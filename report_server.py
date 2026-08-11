@@ -211,9 +211,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _deny_sharing(self):
-        """局域网共享关闭时对非本机请求返回 403"""
-        body = ("局域网共享已关闭（仅本机可访问）。\n"
-                "如需恢复共享，请联系电脑管理员双击 开启局域网共享.cmd。").encode("utf-8")
+        """局域网共享关闭时对非本机请求返回 403（对同事显示中性提示）"""
+        body = "网络连接中，请稍后".encode("utf-8")
         self.send_response(403)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
