@@ -370,13 +370,45 @@ def build_quick_review_html(packs):
 
 
 # ---------------- 研究任务包 ----------------
-def build_task_pack(pack):
-    """生成 Markdown 研究任务包：把数据底稿 + 四大师框架清单交给 Codex"""
+def _quant_summary(code):
+    """复用项目已有量化分析：趋势状态 / L3 评分 / 回测总收益（失败返回错误信息）"""
+    try:
+        import quant_engine as Q
+        import v2
+        a = Q.analyze(code)
+        a2 = None
+        try:
+            a2 = v2.analyze_v2(code, a["quote"]["name"])
+        except Exception:
+            a2 = None
+        return {
+            "status": a2["status"] if a2 else a["verdict"],
+            "l3": a2["l3"] if a2 else None,
+            "trend_verdict": a["verdict"],
+            "backtest_total_ret": a["bt"]["total_ret"],
+            "price": a["quote"]["price"],
+            "change_pct": a["quote"]["change_pct"],
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def build_task_pack(pack, quant=None):
+    """生成 Markdown 研究任务包：数据底稿 + 量化面 + 四大师规则速评 + 执行要求"""
     code = pack["code"]
     name = pack.get("name", code)
     date8 = datetime.date.today().strftime("%Y%m%d")
     verify = pack.get("verify") or {}
     fins = pack.get("financials") or []
+    if quant is None:
+        quant = _quant_summary(code)
+    master = None
+    try:
+        import master_score
+        master = master_score.master_scores(
+            pack, quant=quant if isinstance(quant, dict) and "error" not in quant else None)
+    except Exception:
+        master = None
 
     fin_rows = "\n".join(
         f"| {f['report_date']} | {_fmt(f['revenue'])} | {_fmt_pct(f['rev_growth'])} "
@@ -410,6 +442,22 @@ def build_task_pack(pack):
 
 > ⚠️ 以上为单源数据（东财），未做双源交叉验证。深度研究时按 financial-data 规范补充巨潮/年报原文，误差>1% 须标记。
 
+### 项目量化面速览（选股系统已有分析，供对照）
+
+| 项目 | 数值 |
+|---|---|
+| 趋势状态 | {quant.get('status', '—') if isinstance(quant, dict) else '—'} |
+| 趋势结论（v2） | {quant.get('trend_verdict', '—') if isinstance(quant, dict) else '—'} |
+| L3 择时评分 | {quant.get('l3', '—') if isinstance(quant, dict) else '—'} |
+| 策略回测总收益 | {quant.get('backtest_total_ret', '—') if isinstance(quant, dict) else '—'} |
+| 现价 / 当日涨跌 | {quant.get('price', '—') if isinstance(quant, dict) else '—'} / {quant.get('change_pct', '—') if isinstance(quant, dict) else '—'}% |
+
+> 若显示“—”，说明量化分析暂不可用（联网失败或数据不足），深度研究时可直接以行情/财务数据为准。
+
+### 四大师规则化速评（数据代理近似，供参考）
+
+{_master_markdown(master) if master else '> 速评暂不可用（数据不足）。'}
+
 ## 二、研究执行要求（引用两个 Skill 的核心流程）
 
 1. **信息丰富度评级**：先给出 A/B/C 评级并说明对研究策略的影响（A 级重点做反面检验；C 级用第一性原理）。
@@ -432,6 +480,15 @@ def build_task_pack(pack):
 - HTML 报告：`报告归档/研究/{code}/{name}研究报告_{date8}.html`
 - 内部底稿：`报告归档/研究/{code}/{name}研究报告_{date8}.md`
 """
+
+
+def _master_markdown(master):
+    rows = "\n".join(
+        f"| {d['key']}（{d['master']}） | {d['score']:.1f}/5 | {d['notes'][0] if d['notes'] else '—'} |"
+        for d in master["dimensions"])
+    return (f"| 维度 | 得分 | 要点 |\n|---|---|---|\n{rows}\n"
+            f"| **综合** | **{master['overall']:.2f}/5** | **{master['verdict']}** |\n\n"
+            f"> {master['warning']}")
 
 
 # ---------------- CLI ----------------

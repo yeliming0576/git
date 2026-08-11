@@ -71,7 +71,7 @@ def read_watchlist():
 
 
 def build_report_html(analyses, title, note, gen_time, watch_codes=None, tracking=None,
-                      quick_html=""):
+                      quick_html="", master_html=""):
     """单HTML + 顶部按钮切换 + 每只股票全量详情"""
     watch_codes = watch_codes or []
     name_of = {}
@@ -122,6 +122,7 @@ def build_report_html(analyses, title, note, gen_time, watch_codes=None, trackin
     <div class="sub" style="margin-top:10px;">提示：添加/移除需要联网重新生成（约10~60秒），请通过“启动报告服务”打开本报告操作；直接双击文件打开仅能编辑，不能添加/保存。</div>
   </div>
 {quick_html}
+{master_html}
 </div>""")
     # 第1页: 近7日选股跟踪
     tabs.append('<button class="navbtn" data-slide="slide1">近7日跟踪</button>')
@@ -582,8 +583,28 @@ def main():
         _prog(73, "基本面速评完成")
     except Exception as e:
         print("[基本面] 速评模块不可用:", e)
+    master_html = ""
+    try:
+        import master_score
+        quant_map = {}
+        for code, _label, a, a2 in analyses:
+            if a is None:
+                continue
+            quant_map[code] = {
+                "status": a2["status"] if a2 else a["verdict"],
+                "l3": a2["l3"] if a2 else None,
+                "trend_verdict": a["verdict"],
+                "backtest_total_ret": a["bt"]["total_ret"],
+                "price": a["quote"]["price"],
+                "change_pct": a["quote"]["change_pct"],
+            }
+        master_html = master_score.build_master_review_html(quick, quant_map)
+        _prog(74, "四大师定性速评完成")
+    except Exception as e:
+        print("[四大师] 速评模块不可用:", e)
     html = build_report_html(analyses, title, note, now, watch_codes=watch,
-                             tracking=tracking_data, quick_html=quick_html)
+                             tracking=tracking_data, quick_html=quick_html,
+                             master_html=master_html)
     out = os.path.join(OUT_DIR, f"每日量化选股报告_{today}.html")
     with open(out, "w", encoding="utf-8") as f:
         f.write(html)
