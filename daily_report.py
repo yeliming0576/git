@@ -644,6 +644,10 @@ def main():
                              tracking=tracking_data, quick_html=quick_html,
                              master_html=master_html, thesis_html=thesis_html)
     out = os.path.join(OUT_DIR, f"每日量化选股报告_{today}.html")
+    ok_n = sum(1 for _c, _l, a, _a2 in analyses if a is not None)
+    if ok_n == 0 and os.path.exists(out):
+        print(f"[报告] 全部 {len(analyses)} 只分析失败（行情接口不可用），保留上一份报告，本次不覆盖。")
+        return
     with open(out, "w", encoding="utf-8") as f:
         f.write(html)
     print("报告已保存:", out)
