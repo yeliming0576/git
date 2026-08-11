@@ -183,14 +183,24 @@ def main():
             a2 = v2.analyze_v2(code, q["name"])
         except Exception:
             continue
-        if not a2 or a2["status"] != "强势可入":
-            journal.log_signal(today, code, a2["l1"] if a2 else 0,
-                               a2["l2"] if a2 else 0, a2["l3"] if a2 else 0,
+        if not a2:
+            continue
+        bt_n = (a2.get("bt") or {}).get("n") or 0
+        if a2["status"] != "强势可入":
+            journal.log_signal(today, code, a2["l1"], a2["l2"], a2["l3"],
                                0, a2["status"] if a2 else "数据失败")
+            continue
+        if bt_n < 30:
+            # P3：回测样本不足不输出结论，也不入候选
+            journal.log_signal(today, code, a2["l1"], a2["l2"], a2["l3"],
+                               0, f"回测样本不足({bt_n}笔)")
+            print(f"  {code} 回测样本不足({bt_n} 笔)，跳过")
             continue
         rows = history.get_history(code, "hfq")
         rows_map[code] = rows
         last = a2["last"]
+        mode = "截面动量" if a2.get("cs_used") else "自身时序"
+        print(f"  {code} {q['name']} 强势可入（相对强度={mode}）")
         cands.append(portfolio_builder.Candidate(
             code=code, name=q["name"], score=a2["l3"],
             entry=last["close"], atr20=last["atr20"] or 0,
@@ -267,13 +277,29 @@ def main():
           f"今日 {day_return:+.2%}）")
     for a in actions:
         print("风控:", a)
-    render_report(today, targets, stats, orders, actions, cands, excluded, equity_now)
+        try:
+            level = a[0].split("_")[0] if "_" in a[0] else a[0]
+            journal.log_risk(today, level, a[1] or "", a[2],
+                             str(a[3]) if len(a) > 3 else "")
+        except Exception:
+            pass
+    run_days = journal.nav_distinct_days()
+    risk_count = journal.risk_event_count()
+    if journal.nav_ready():
+        print(f"净值数据已达标（{run_days} 天且有真实持仓市值），月度归因可启用（需接入基准收益率）")
+    else:
+        print(f"净值数据尚不足（{run_days} 天，且需出现真实持仓市值），月度归因暂不启用")
+    render_report(today, targets, stats, orders, actions, cands, excluded, equity_now,
+                  run_days=run_days, risk_count=risk_count)
     _prog(99, "组合报告已生成")
     print("组合报告已生成: 组合与执行报告.html")
 
 
-def render_report(today, targets, stats, orders, actions, cands, excluded, equity=None):
+def render_report(today, targets, stats, orders, actions, cands, excluded, equity=None,
+                  run_days=None, risk_count=None):
     equity = equity or EQUITY
+    run_days = run_days if run_days is not None else journal.nav_distinct_days()
+    risk_count = risk_count if risk_count is not None else journal.risk_event_count()
     rows = ""
     for code, sh in targets.items():
         c = next((x for x in cands if x.code == code), None)
@@ -320,7 +346,8 @@ h2{{font-size:18px;margin:20px 0 4px;color:#2563eb;border-left:3px solid #2563eb
 <table><tr><th>级别</th><th>标的</th><th>说明</th></tr>{act_rows or '<tr><td colspan="3">无触发</td></tr>'}</table>
 <h2>L4 热度剔除</h2>
 <div class="sub">{ex_rows}</div>
-<div class="warn">模拟盘说明：订单 T 日生成、T+1 开盘执行；涨跌停/停牌顺延；三级风控仅做报告，未连接券商。过渡期至少运行 3 个月，信号一致率>95%、成交率>90%、平均滑点<15bps 后再考虑实盘。</div>
+<div class="warn">模拟盘说明：订单 T 日生成、T+1 开盘执行；涨跌停/停牌顺延；三级风控已接通真实数据并记录到 journal.risk_log。<br>
+实盘门槛：模拟运行 ≥90 天（当前 {run_days} 天）；风控实际触发 ≥1 次（当前 {risk_count} 次）；信号一致率>95%、成交率>90%、平均滑点<15bps。达标前不接实盘。</div>
 </div></body></html>"""
     with open(os.path.join(BASE, "组合与执行报告.html"), "w", encoding="utf-8") as f:
         f.write(html)

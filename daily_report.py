@@ -16,6 +16,8 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 LAUNCHER = os.path.join(BASE, "启动报告服务.cmd").replace(os.sep, "/")
 SKILL_ROOT = os.path.join(BASE, "cnfinancialscraper")
 import eastmoney  # noqa: E402  内置备用数据源（技能缺失时兜底）
+import html  # noqa: E402
+import db  # noqa: E402
 try:
     sys.path.insert(0, SKILL_ROOT)
     sys.path.insert(0, os.path.join(SKILL_ROOT, "scripts"))
@@ -71,7 +73,7 @@ def read_watchlist():
 
 
 def build_report_html(analyses, title, note, gen_time, watch_codes=None, tracking=None,
-                      quick_html="", master_html=""):
+                      quick_html="", master_html="", thesis_html=""):
     """单HTML + 顶部按钮切换 + 每只股票全量详情"""
     watch_codes = watch_codes or []
     name_of = {}
@@ -90,13 +92,15 @@ def build_report_html(analyses, title, note, gen_time, watch_codes=None, trackin
         status = a2["status"] if a2 else a["verdict"]
         vcol = {"强势可入": "#dc2626", "强势观望": "#ea580c",
                 "弱势": "#059669", "风险警示": "#7c3aed"}.get(status, "#6b7280") if a2 else a["vcolor"]
+        bt_n = (a.get("bt") or {}).get("n", 0)
+        bt_tag = " <span style='color:#b45309'>⚠样本不足</span>" if bt_n < 30 else ""
         ov.append(
             f"<tr class='clickable' onclick='go({n})'><td>{code}</td><td>{a['quote']['name']}</td>"
             f"<td><span class='tag v' style='background:{vcol}18;color:{vcol};border-color:{vcol}'>{status}</span></td>"
             f"<td>{a['quote']['price']:.2f}</td>"
             f"<td class='{cls}'>{a['quote']['change_pct']:+.2f}%</td>"
             f"<td class='{cls2}'>{a['half_ret']:+.2f}%</td>"
-            f"<td>{a['bt']['total_ret']}%</td></tr>")
+            f"<td>{a['bt']['total_ret']}%{bt_tag}</td></tr>")
     overview_rows = "".join(ov) or "<tr><td colspan='7'>暂无股票数据</td></tr>"
     watch_rows = "".join(
         f"<tr><td>{c}</td><td>{name_of.get(c, '—')}</td>"
@@ -123,6 +127,7 @@ def build_report_html(analyses, title, note, gen_time, watch_codes=None, trackin
   </div>
 {quick_html}
 {master_html}
+{thesis_html}
 </div>""")
     # 第1页: 近7日选股跟踪
     tabs.append('<button class="navbtn" data-slide="slide1">近7日跟踪</button>')
@@ -602,9 +607,40 @@ def main():
         _prog(74, "四大师定性速评完成")
     except Exception as e:
         print("[四大师] 速评模块不可用:", e)
+    thesis_html = ""
+    try:
+        rows = []
+        for c, _l in codes:
+            t = db.load_latest_thesis(c)
+            if not t:
+                continue
+            d = os.path.join(BASE, "报告归档", "研究", c)
+            link = ""
+            if os.path.isdir(d):
+                for f in sorted(os.listdir(d)):
+                    if f.endswith(".html") and "研究报告" in f:
+                        link = (f"<a href='报告归档/研究/{c}/{f}' target='_blank'>"
+                                f"{html.escape(f)}</a>")
+                        break
+            rows.append(
+                f"<tr><td>{html.escape(c)}</td><td>{html.escape(t.get('verdict') or '—')}</td>"
+                f"<td>{t.get('overall_score') or '—'}</td>"
+                f"<td>{html.escape(t.get('report_date') or '—')}</td>"
+                f"<td>{html.escape((t.get('red_lines') or '—')[:80])}</td>"
+                f"<td>{link or '—'}</td></tr>")
+        if rows:
+            thesis_html = f"""
+  <h2>深度研究状态（论文回写）</h2>
+  <div class="sub">深度研究报告完成后由 Codex 回写结论与红线清单；红线触发时应重新评估持仓。</div>
+  <div class="panel">
+    <table><tr><th>代码</th><th>结论</th><th>综合分</th><th>报告日期</th><th>红线清单</th><th>报告</th></tr>{''.join(rows)}</table>
+  </div>"""
+        _prog(75, "深度研究状态完成")
+    except Exception as e:
+        print("[研究] 论文状态读取失败:", e)
     html = build_report_html(analyses, title, note, now, watch_codes=watch,
                              tracking=tracking_data, quick_html=quick_html,
-                             master_html=master_html)
+                             master_html=master_html, thesis_html=thesis_html)
     out = os.path.join(OUT_DIR, f"每日量化选股报告_{today}.html")
     with open(out, "w", encoding="utf-8") as f:
         f.write(html)

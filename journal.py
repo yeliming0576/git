@@ -54,6 +54,10 @@ def init_db():
             reason TEXT, status TEXT DEFAULT 'pending',
             PRIMARY KEY (signal_date, code, side)
         );
+        CREATE TABLE IF NOT EXISTS risk_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT, level TEXT, code TEXT, action TEXT, detail TEXT
+        );
         """)
         conn.commit()
     finally:
@@ -186,6 +190,45 @@ def consistency(signals_expected, signals_actual, fills, avg_slippage):
         "fill_rate": round(fills / signals_actual * 100, 1) if signals_actual else None,
         "avg_slippage_bps": round(avg_slippage, 1) if avg_slippage is not None else None,
     }
+
+
+# ---------------- 风控日志与实盘门槛（P3） ----------------
+def log_risk(date, level, code, action, detail=""):
+    conn = _connect()
+    try:
+        conn.execute("INSERT INTO risk_log(date, level, code, action, detail) VALUES(?,?,?,?,?)",
+                     (date, level, code, action, detail))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def risk_event_count():
+    conn = _connect()
+    try:
+        return conn.execute("SELECT COUNT(*) FROM risk_log").fetchone()[0]
+    finally:
+        conn.close()
+
+
+def nav_distinct_days():
+    conn = _connect()
+    try:
+        return conn.execute("SELECT COUNT(DISTINCT date) FROM daily_nav").fetchone()[0]
+    finally:
+        conn.close()
+
+
+def nav_ready(days=20):
+    """净值数据是否够做归因：至少 days 个交易日，且出现过真实持仓市值。"""
+    conn = _connect()
+    try:
+        n = conn.execute("SELECT COUNT(DISTINCT date) FROM daily_nav").fetchone()[0]
+        has_pos = conn.execute(
+            "SELECT COUNT(*) FROM daily_nav WHERE position_mv > 0").fetchone()[0]
+    finally:
+        conn.close()
+    return n >= days and has_pos > 0
 
 
 if __name__ == "__main__":

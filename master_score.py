@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-四大师定性框架速评（规则化近似）
+四大师财务代理初筛（规则化近似）
 ================================
 把 AI-Berkshire 四大师框架（段永平/巴菲特/芒格/李录）转成可由财务数据
 驱动的确定性评分，用于：
   - 每日报告“四大师定性速评”节（自动生成，不改选股逻辑）
   - 深度研究任务包中的“规则化速评”表（供 Codex 做真正定性研究时参考）
 
-重要声明：本模块只是“数据代理的初筛近似”，不是真正的定性判断。
+重要声明：本模块只是“财务数据代理的初筛近似”，不是真正的定性判断。
 真实四大师分析仍需把任务包交给 Codex 按 investment-team/investment-research 执行。
 
 评分范围：每维 0~5 分，综合 = 四维加权平均；分数越高越偏正面。
@@ -38,6 +38,16 @@ def _clamp(v, lo=0.0, hi=5.0):
 def _star(n):
     n = max(0, min(5, round(n)))
     return "★" * n + "☆" * (5 - n)
+
+
+def _confidence(fins, keys, need_high=3):
+    """按可用数据量给出维度置信度：高/中/低"""
+    n = sum(1 for k in keys if _series(fins, k))
+    if n >= need_high:
+        return "高"
+    if n >= 1:
+        return "中"
+    return "低"
 
 
 def _score_business(name, fins):
@@ -246,18 +256,26 @@ def master_scores(pack, quant=None):
     else:
         verdict = "暂不关注"
     dims = [
-        {"key": "生意本质", "master": "段永平", "score": business, "notes": b_notes},
-        {"key": "护城河质量", "master": "巴菲特", "score": moat, "notes": m_notes},
-        {"key": "风险逆向", "master": "芒格", "score": risk, "notes": r_notes},
-        {"key": "行业趋势", "master": "李录", "score": trend, "notes": t_notes},
+        {"key": "生意本质", "master": "段永平", "score": business, "notes": b_notes,
+         "confidence": _confidence(fins, ("gross_margin", "net_margin", "roe", "debt_ratio"))},
+        {"key": "护城河质量", "master": "巴菲特", "score": moat, "notes": m_notes,
+         "confidence": _confidence(fins, ("gross_margin", "roe", "debt_ratio", "ocf_ps"))},
+        {"key": "风险逆向", "master": "芒格", "score": risk, "notes": r_notes,
+         "confidence": _confidence(fins, ("debt_ratio", "rev_growth", "profit_growth"))},
+        {"key": "行业趋势", "master": "李录", "score": trend, "notes": t_notes,
+         "confidence": _confidence(fins, ("rev_growth", "profit_growth", "gross_margin"))},
     ]
+    conf_levels = [d["confidence"] for d in dims]
+    overall_conf = "高" if all(c == "高" for c in conf_levels) else \
+        ("低" if any(c == "低" for c in conf_levels) else "中")
     return {
         "dimensions": dims,
         "overall": overall,
+        "overall_confidence": overall_conf,
         "verdict": verdict,
         "generated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
         "quant": quant,
-        "warning": "规则化近似：用财务数据代理四大师框架，非真实定性判断；深度研究需按任务包由 Codex 执行。",
+        "warning": "财务代理初筛：用可得的财务/行情数据按规则近似四大师框架，非真实定性判断，置信度仅代表数据完整度；深度研究需按任务包由 Codex 执行。",
     }
 
 
@@ -271,17 +289,17 @@ def build_master_review_html(packs, quant_map=None):
         m = master_scores(p, quant=quant)
         cells = "".join(
             f"<td>{_star(d['score'])} <span style='color:#6b7280'>{d['score']:.1f}</span>"
-            f"<div class='hint'>{html.escape(d['notes'][0])}</div></td>"
+            f"<div class='hint'>置信度:{d['confidence']} · {html.escape(d['notes'][0])}</div></td>"
             for d in m["dimensions"])
         rows.append(
             f"<tr><td>{html.escape(p['code'])}</td><td>{html.escape(p['name'])}</td>{cells}"
-            f"<td><b>{m['overall']:.2f}</b></td>"
+            f"<td><b>{m['overall']:.2f}</b><div class='hint'>置信度:{m['overall_confidence']}</div></td>"
             f"<td><b>{html.escape(m['verdict'])}</b></td></tr>")
     if not rows:
         return ""
     return f"""
-  <h2>四大师定性速评（规则化近似）</h2>
-  <div class="sub">段永平·生意本质 / 巴菲特·护城河质量 / 芒格·风险逆向 / 李录·行业趋势，各 0~5 分（★）；由财务数据自动代理计算，<b>仅初筛参考，非真实定性判断</b>。综合 ≥3.5 值得深度研究，2.5~3.5 观察，&lt;2.5 暂不关注。</div>
+  <h2>四大师财务代理初筛</h2>
+  <div class="sub">段永平·生意本质 / 巴菲特·护城河质量 / 芒格·风险逆向 / 李录·行业趋势，各 0~5 分（★）；由财务数据按规则近似，<b>置信度仅代表数据完整度，不代表判断正确率</b>；非真实定性判断。综合 ≥3.5 值得深度研究，2.5~3.5 观察，&lt;2.5 暂不关注。</div>
   <div class="panel">
     <table><tr><th>代码</th><th>名称</th><th>生意本质<br>段永平</th><th>护城河质量<br>巴菲特</th><th>风险逆向<br>芒格</th><th>行业趋势<br>李录</th><th>综合</th><th>初步结论</th></tr>{''.join(rows)}</table>
     <div class="hint">深度定性分析：把该股研究任务包发给 Codex，按 investment-team + investment-research 执行。</div>

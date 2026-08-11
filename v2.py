@@ -30,7 +30,7 @@ PERM_N = 200                 # 随机对照抽样次数（规范 1000，控制�
 # 规范内部矛盾修正：目标=entry+3ATR、止损=entry-2ATR 时盈亏比恒为1.5<2，
 # 故目标位按 4×ATR 实现（=2:1），保证“盈亏比≥2”过滤可执行
 TARGET_ATR_MULT = 4.0
-CACHE_VERSION = 2            # v2 结果缓存版本（规则/口径变更时+1，自动重算）
+CACHE_VERSION = 3            # v2 结果缓存版本（规则/口径变更时+1，自动重算）
 
 
 # ---------------- 基础指标 ----------------
@@ -162,7 +162,7 @@ def build_features(rows, index_map, ma_period=60):
 
 
 # ---------------- 过滤与状态 ----------------
-def status_of(f, i, name, ma_period=60, rs_threshold=70, abs_i=None):
+def status_of(f, i, name, ma_period=60, rs_threshold=70, abs_i=None, cs=None):
     d = f[i]
     abs_i = abs_i if abs_i is not None else i
     # L1 可交易性
@@ -175,11 +175,17 @@ def status_of(f, i, name, ma_period=60, rs_threshold=70, abs_i=None):
         "ST/退市风险" if name.startswith(("ST", "*ST", "退")) else None,
     ]
     l1_reason = [x for x in l1_reason if x]
-    # L2 趋势门槛
+    # L2 趋势门槛（相对强度优先用全市场截面 60 日动量百分位，缺失时回退自身时序分位）
+    if cs and cs.get("mom60_pct") is not None:
+        rs_ok, cs_used = cs["mom60_pct"] >= rs_threshold, True
+    elif d.get("rs_rank") is not None:
+        rs_ok, cs_used = d["rs_rank"] >= rs_threshold, False
+    else:
+        rs_ok, cs_used = False, False
     l2 = bool(l1 and d.get("slope60") is not None and d["slope60"] > 0.05
               and d["close"] > (d["ma"] or 0)
               and d.get("rs20") is not None and d["rs20"] > 0
-              and d.get("rs_rank") is not None and d["rs_rank"] >= rs_threshold
+              and rs_ok
               and not d.get("divergence"))
     # L3 择时评分（0~100）
     l3 = 0.0
@@ -193,9 +199,12 @@ def status_of(f, i, name, ma_period=60, rs_threshold=70, abs_i=None):
         l3 += min(d["vol_ratio"] / 2, 1.0) * 15
     if d.get("ma20") and d.get("atr20"):
         l3 += max(0.0, 1 - abs(d["close"] - d["ma20"]) / (2 * d["atr20"])) * 10
+    if cs and cs.get("chg_pct") is not None:
+        l3 += (100 - cs["chg_pct"]) / 100 * 10      # 当日涨幅截面分位越高，追高惩罚越大
     l3 = max(0.0, min(100.0, l3))
     # 风险警示
-    risk = bool(d.get("divergence") or (d.get("vol_pct") or 0) > 90)
+    risk = bool(d.get("divergence") or (d.get("vol_pct") or 0) > 90
+                or (cs and (cs.get("chg_pct") or 0) > 90))
     if not risk and d.get("ma20"):
         cnt = 0
         for j in range(i, max(0, i - 3), -1):
@@ -211,7 +220,7 @@ def status_of(f, i, name, ma_period=60, rs_threshold=70, abs_i=None):
     else:
         status = "弱势"
     return {"l1": l1, "l1_reason": l1_reason, "l2": l2, "l3": round(l3, 1),
-            "status": status, "risk": risk}
+            "status": status, "risk": risk, "cs_used": cs_used}
 
 
 # ---------------- 回测 ----------------
@@ -421,7 +430,13 @@ def analyze_v2(code, name="", equity=EQUITY_DEFAULT):
     index_map = _index_map(rows)
     f = build_features(rows, index_map)
     last_i = len(rows) - 1
-    st = status_of(f, last_i, name)
+    cs = None
+    try:
+        import market_snapshot
+        cs = market_snapshot.cross_sectional(code)
+    except Exception:
+        cs = None
+    st = status_of(f, last_i, name, cs=cs)
     d = f[last_i]
     # 展示/交易计划用前复权价格（与现价可比），回测特征用后复权（可复现）
     q_closes = [r["close"] for r in rows_q]
@@ -473,6 +488,9 @@ def analyze_v2(code, name="", equity=EQUITY_DEFAULT):
         "vol_pct": round(d.get("vol_pct") or 0, 1),
         "vol_ratio": round(d.get("vol_ratio") or 0, 2),
         "mom_score": round(d.get("mom_score") or 0, 1),
+        "cs_used": bool(st.get("cs_used")),
+        "cs_mom60_pct": round(cs.get("mom60_pct") or 0, 1) if cs else None,
+        "cs_chg_pct": round(cs.get("chg_pct") or 0, 1) if cs else None,
         "equity": equity,
     }
     result["from_cache"] = False

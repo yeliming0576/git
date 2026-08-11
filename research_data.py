@@ -21,6 +21,7 @@ import datetime
 import html
 import json
 import os
+import re
 import sys
 from decimal import Decimal, ROUND_HALF_EVEN
 
@@ -458,6 +459,23 @@ def build_task_pack(pack, quant=None):
 
 {_master_markdown(master) if master else '> 速评暂不可用（数据不足）。'}
 
+### 研究元数据（生成内部底稿时必填，用于回写 journal）
+
+Codex 生成内部 Markdown 底稿时，请在文件开头保留以下元数据块并如实填写：
+
+```text
+<!-- thesis-metadata
+code: {code}
+report_date: {datetime.date.today().strftime('%Y-%m-%d')}
+verdict: 值得深度研究 / 观察 / 暂不关注
+overall_score: 0~5
+red_lines: 红线1；红线2；红线3（触发即重审）
+valuation: 乐观 价格 / 中性 价格 / 悲观 价格
+-->
+```
+
+填写后执行回写：`python research_data.py --import-thesis {code} "报告归档\\研究\\{code}\\内部底稿.md"`
+
 ## 二、研究执行要求（引用两个 Skill 的核心流程）
 
 1. **信息丰富度评级**：先给出 A/B/C 评级并说明对研究策略的影响（A 级重点做反面检验；C 级用第一性原理）。
@@ -484,17 +502,60 @@ def build_task_pack(pack, quant=None):
 
 def _master_markdown(master):
     rows = "\n".join(
-        f"| {d['key']}（{d['master']}） | {d['score']:.1f}/5 | {d['notes'][0] if d['notes'] else '—'} |"
+        f"| {d['key']}（{d['master']}） | {d['score']:.1f}/5 | {d['confidence']} "
+        f"| {d['notes'][0] if d['notes'] else '—'} |"
         for d in master["dimensions"])
-    return (f"| 维度 | 得分 | 要点 |\n|---|---|---|\n{rows}\n"
-            f"| **综合** | **{master['overall']:.2f}/5** | **{master['verdict']}** |\n\n"
+    return (f"| 维度 | 得分 | 置信度 | 要点 |\n|---|---|---|---|\n{rows}\n"
+            f"| **综合** | **{master['overall']:.2f}/5** | **{master['overall_confidence']}** "
+            f"| **{master['verdict']}** |\n\n"
             f"> {master['warning']}")
+
+
+def import_thesis(code, md_path):
+    """解析内部底稿开头的 thesis-metadata 元数据块并回写 journal。"""
+    with open(md_path, encoding="utf-8") as f:
+        text = f.read()
+    m = re.search(r"<!--\s*thesis-metadata(.*?)-->", text, re.S)
+    if not m:
+        print("❌ 未找到 thesis-metadata 元数据块，无法回写")
+        return 1
+    kv = {}
+    for line in m.group(1).splitlines():
+        line = line.strip()
+        if ":" in line:
+            k, v = line.split(":", 1)
+            kv[k.strip().lower()] = v.strip()
+    code = kv.get("code") or code
+    report_date = kv.get("report_date") or datetime.date.today().strftime("%Y-%m-%d")
+    try:
+        score = float(kv.get("overall_score") or 0)
+    except ValueError:
+        score = 0.0
+    db.save_thesis(code, report_date, kv.get("verdict") or "", score, text,
+                   kv.get("red_lines") or "", kv.get("valuation") or "")
+    print(f"✅ 已回写论文：{code} @ {report_date} 结论={kv.get('verdict', '')} "
+          f"综合={score} 红线={kv.get('red_lines', '')}")
+    return 0
 
 
 # ---------------- CLI ----------------
 def main(argv):
+    if len(argv) >= 2 and argv[1] == "--import-thesis":
+        if len(argv) < 4:
+            print("用法: python research_data.py --import-thesis <代码> <内部底稿.md>")
+            return 1
+        return import_thesis(argv[2], argv[3])
+    if len(argv) >= 2 and argv[1] == "--thesis":
+        if len(argv) < 3:
+            print("用法: python research_data.py --thesis <代码>")
+            return 1
+        t = db.load_latest_thesis(argv[2])
+        print(json.dumps(t, ensure_ascii=False, indent=1) if t else "暂无论文记录")
+        return 0
     if len(argv) < 2:
         print("用法: python research_data.py <6位股票代码> [--json|--task|--quick] [--force]")
+        print("      python research_data.py --import-thesis <代码> <内部底稿.md>")
+        print("      python research_data.py --thesis <代码>")
         return 1
     code = argv[1].strip()
     if not (code.isdigit() and len(code) == 6):

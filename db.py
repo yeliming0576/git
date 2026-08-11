@@ -6,6 +6,10 @@ SQLite 数据层（选股系统 v2 配套）
   - rank_history  每日三榜 Z-score 排名历史（多日持续性评分用）
   - hot_picks     每日选股结果（接口无数据时的缓存兜底）
   - fundamental_snapshots  每日基本面快照缓存（research_data.py 使用）
+  - market_snapshots        全市场截面快照（market_snapshot.py 使用）
+  - thesis_snapshots        深度研究论文回写（P2 闭环）
+  - risk_log                风控动作日志（P3 实盘门槛依据）
+  - selection_runs          每日选股运行状态（空转监测）
 数据库不可用时自动降级到原来的 JSON 文件，不会影响运行。
 """
 import datetime
@@ -52,6 +56,30 @@ def init_db():
             json TEXT,
             fetched_at TEXT,
             PRIMARY KEY (code, report_date))""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS market_snapshots (
+            date TEXT PRIMARY KEY,
+            json TEXT,
+            fetched_at TEXT)""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS thesis_snapshots (
+            code TEXT NOT NULL,
+            report_date TEXT NOT NULL,
+            verdict TEXT,
+            overall_score REAL,
+            thesis_md TEXT,
+            red_lines TEXT,
+            valuation TEXT,
+            PRIMARY KEY (code, report_date))""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS risk_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT,
+            level TEXT,
+            code TEXT,
+            action TEXT,
+            detail TEXT)""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS selection_runs (
+            date TEXT PRIMARY KEY,
+            picks_count INTEGER,
+            market_ok INTEGER)""")
         conn.commit()
     finally:
         conn.close()
@@ -211,6 +239,138 @@ def load_fundamental_snapshot(code, report_date=None):
         return json.loads(row[0])
     except Exception:
         return None
+
+
+# ---------------- 全市场截面快照（market_snapshot.py 用） ----------------
+def save_market_snapshot(date, data):
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO market_snapshots(date, json, fetched_at) VALUES(?,?,?)",
+            (date, json.dumps(data, ensure_ascii=False),
+             datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def load_market_snapshot(date=None):
+    conn = _connect()
+    try:
+        if date:
+            row = conn.execute("SELECT json FROM market_snapshots WHERE date=?",
+                               (date,)).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT json FROM market_snapshots ORDER BY date DESC LIMIT 1").fetchone()
+    finally:
+        conn.close()
+    if not row or not row[0]:
+        return None
+    try:
+        return json.loads(row[0])
+    except Exception:
+        return None
+
+
+# ---------------- 深度研究论文回写（P2 闭环） ----------------
+def save_thesis(code, report_date, verdict, overall_score, thesis_md="",
+                red_lines="", valuation=""):
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO thesis_snapshots"
+            "(code, report_date, verdict, overall_score, thesis_md, red_lines, valuation) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (code, report_date, verdict, overall_score, thesis_md, red_lines, valuation))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def load_latest_thesis(code):
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT code, report_date, verdict, overall_score, thesis_md, red_lines, valuation "
+            "FROM thesis_snapshots WHERE code=? ORDER BY report_date DESC LIMIT 1",
+            (code,)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    keys = ("code", "report_date", "verdict", "overall_score",
+            "thesis_md", "red_lines", "valuation")
+    return dict(zip(keys, row))
+
+
+# ---------------- 风控日志与实盘门槛（P3） ----------------
+def log_risk(date, level, code, action, detail=""):
+    conn = _connect()
+    try:
+        conn.execute("INSERT INTO risk_log(date, level, code, action, detail) VALUES(?,?,?,?,?)",
+                     (date, level, code, action, detail))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def risk_event_count():
+    conn = _connect()
+    try:
+        return conn.execute("SELECT COUNT(*) FROM risk_log").fetchone()[0]
+    finally:
+        conn.close()
+
+
+def nav_distinct_days():
+    conn = _connect()
+    try:
+        return conn.execute("SELECT COUNT(DISTINCT date) FROM daily_nav").fetchone()[0]
+    finally:
+        conn.close()
+
+
+def nav_ready(days=20):
+    """净值数据是否够做归因：至少 days 个交易日，且出现过真实持仓市值。"""
+    conn = _connect()
+    try:
+        n = conn.execute("SELECT COUNT(DISTINCT date) FROM daily_nav").fetchone()[0]
+        has_pos = conn.execute(
+            "SELECT COUNT(*) FROM daily_nav WHERE position_mv > 0").fetchone()[0]
+    finally:
+        conn.close()
+    return n >= days and has_pos > 0
+
+
+# ---------------- 选股运行状态（空转监测） ----------------
+def save_selection_run(date, picks_count, market_ok):
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO selection_runs(date, picks_count, market_ok) VALUES(?,?,?)",
+            (date, int(picks_count), market_ok))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def consecutive_empty_runs(days=10):
+    """最近 N 个运行日中连续空转（0 只选股）的天数；无记录返回 0。"""
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT date, picks_count FROM selection_runs ORDER BY date DESC LIMIT ?",
+            (days,)).fetchall()
+    finally:
+        conn.close()
+    cnt = 0
+    for date, picks_count in rows:
+        if picks_count == 0:
+            cnt += 1
+        else:
+            break
+    return cnt
 
 
 def purge_code(code):

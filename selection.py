@@ -346,20 +346,34 @@ def _percentile_filter(codes, info, level=PERCENTILE_LEVEL):
 
 
 def _market_regime():
-    """中证全指：收盘>MA20 且 MA20>MA60 -> 正常；否则降仓"""
+    """中证全指 MA20/MA60 + 全市场宽度；指数偏弱才降仓，
+    指数正常但宽度偏弱时降为“观察”（不强制只剩1只），避免长期空转。"""
     try:
         rows = fetch_index_kline(datalen=120)
         closes = [r["close"] for r in rows]
         ma20 = Q.sma(closes, 20)
         ma60 = Q.sma(closes, 60)
         last = closes[-1]
-        ok = last > ma20[-1] and ma20[-1] > ma60[-1]
+        index_ok = last > ma20[-1] and ma20[-1] > ma60[-1]
         note = (f"中证全指 {rows[-1]['date']} 收{last:.0f}，"
-                f"MA20={ma20[-1]:.0f}，MA60={ma60[-1]:.0f}，"
-                f"环境{'正常' if ok else '偏弱'}")
-        return ok, note
+                f"MA20={ma20[-1]:.0f}，MA60={ma60[-1]:.0f}")
     except Exception as e:
-        return None, f"指数数据暂不可用，市场过滤未启用（{e}）"
+        index_ok, note = None, f"指数数据暂不可用（{e}）"
+    breadth_ok = None
+    try:
+        import market_snapshot
+        b = market_snapshot.breadth()
+        if b and b.get("advancers_ratio") is not None:
+            breadth_ok = b["advancers_ratio"] >= 0.5
+            note += (f"；市场宽度：涨跌家数比 {b['advancers_ratio']:.0%}，"
+                     f"涨幅中位数 {b['median_change']:+.2f}%")
+    except Exception:
+        pass
+    if index_ok is False:
+        return False, note + " → 环境偏弱（指数未站上MA20/MA60），降仓：仅保留 1 只观察"
+    if index_ok is True and breadth_ok is False:
+        return None, note + " → 指数正常但宽度偏弱，维持观察（不强制降仓至1只）"
+    return index_ok, note + (" → 环境正常" if index_ok is True else " → 环境数据不足，按正常处理")
 
 
 def _select_diverse(codes, limit, industry_map, shortlist, meta):
@@ -485,12 +499,28 @@ def pick_hot_stocks(limit=3):
         except Exception:
             pass
         eastmoney.save_picks_cache(CACHE_FILE, picks)   # 保留JSON备份
+    try:
+        db.save_selection_run(datetime.date.today().strftime("%Y-%m-%d"),
+                              len(picks), meta["market_ok"])
+        empty_n = db.consecutive_empty_runs(10)
+        if len(picks) == 0 and empty_n >= 5:
+            meta["warnings"].append(
+                f"已连续 {empty_n} 个运行日零选股，建议检查市场过滤是否过严或模型失效")
+    except Exception:
+        pass
     return {"picks": picks, "meta": meta}
 
 
 def build_universe(max_n=60, extra_codes=None):
-    """L0 股票池（简化版）：三榜前 max_n + 自选/持仓/固定关注，去重
-    全市场股票池需要 Tushare Pro，免费接口下以“活跃榜单+自选”为代理池"""
+    """L0 股票池：优先全市场截面（成交额+换手 top N，P1 扩大池），
+    失败时回退三榜前 max_n + 自选/持仓/固定关注。"""
+    try:
+        import market_snapshot
+        codes = market_snapshot.top_universe(max_n, extra_codes)
+        if codes:
+            return codes
+    except Exception:
+        pass
     try:
         lists = fetch_rank_lists(120)
     except Exception:
