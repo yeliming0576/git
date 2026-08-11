@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-每日量化报告本地服务（重构版：支持局域网多人同时访问）
-  - 本机访问:   http://127.0.0.1:8765/
-  - 局域网访问: http://<本机IP>:8765/   （同一局域网内其他人用浏览器打开即可）
+每日量化报告本地服务
+  - 本机访问: http://127.0.0.1:8765/
+  - 局域网共享由开关控制（双击 开启局域网共享.cmd / 关闭局域网共享.cmd，即时生效）：
+    关闭时同事访问会收到 403，只有本机可用；开启后同事可通过 http://<本机IP>:8765/ 访问。
   - 报告页的【刷新数据】会重新抓取行情并生成最新报告；
     多人同时刷新/保存时程序会自动排队（互斥锁），不会写坏文件。
 用法: 双击 启动报告服务.cmd，或 python report_server.py [--no-browser] [--port 8765]
@@ -18,11 +19,36 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-HOST = "0.0.0.0"          # 监听所有网卡，局域网可访问
+# 共享开关：存在 局域网共享.flag 时允许非本机访问；关闭时逐请求拦截（即时生效）
+LAN_FLAG = os.path.join(BASE, "局域网共享.flag")
+HOST = "0.0.0.0"
 PORT = 8765
 INTERVAL = 300   # 自动刷新间隔（秒），默认 5 分钟
 LOCK = threading.Lock()   # 多人同时刷新/保存/编辑自选股时互斥，避免写坏文件
 PID_FILE = os.path.join(BASE, "网页服务.pid")
+
+
+def _local_ips():
+    """本机所有网卡 IP + 回环地址：共享关闭时仅这些来源可访问"""
+    ips = {"127.0.0.1", "::1"}
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None):
+            ip = info[4][0]
+            if ip and not ip.startswith("169.254"):
+                ips.add(ip)
+    except Exception:
+        pass
+    return ips
+
+
+LOCAL_IPS = _local_ips()
+
+
+def sharing_allowed(client_ip):
+    """共享开关实时判断：flag 存在=共享；否则仅本机 IP 可访问"""
+    if os.path.exists(LAN_FLAG):
+        return True
+    return client_ip in LOCAL_IPS
 
 
 def _html_escape(s):
@@ -128,6 +154,9 @@ class Handler(BaseHTTPRequestHandler):
         print("[服务]", fmt % args)
 
     def do_GET(self):
+        if not sharing_allowed(self.client_address[0]):
+            self._deny_sharing()
+            return
         if self.path.startswith("/refresh"):
             self._refresh()
             return
@@ -146,6 +175,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_error(404, "Not Found")
 
     def do_POST(self):
+        if not sharing_allowed(self.client_address[0]):
+            self._deny_sharing()
+            return
         if self.path.startswith("/refresh"):
             self._refresh()
             return
@@ -174,6 +206,16 @@ class Handler(BaseHTTPRequestHandler):
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _deny_sharing(self):
+        """局域网共享关闭时对非本机请求返回 403"""
+        body = ("局域网共享已关闭（仅本机可访问）。\n"
+                "如需恢复共享，请联系电脑管理员双击 开启局域网共享.cmd。").encode("utf-8")
+        self.send_response(403)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -363,10 +405,12 @@ def main():
         return
     ip = lan_ip()
     print("=" * 52)
-    print(" 每日量化报告服务已启动（支持局域网多人同时访问）")
+    print(" 每日量化报告服务已启动")
     print(" 本机访问:  http://127.0.0.1:" + str(PORT) + "/")
-    if ip:
-        print(" 局域网访问: http://" + ip + ":" + str(PORT) + "/")
+    sharing = "开" if os.path.exists(LAN_FLAG) else "关"
+    print(f" 局域网共享: {sharing}（双击 开启局域网共享.cmd / 关闭局域网共享.cmd 即时切换）")
+    if sharing == "开" and ip:
+        print(" 同事访问: http://" + ip + ":" + str(PORT) + "/")
         print(" 提示: 首次启动若防火墙弹窗，请选择【允许访问】")
     print(f" 自动刷新: 每 {INTERVAL} 秒重新抓取数据（可用 --interval 秒 修改）")
     print(" 在报告页点击【刷新数据】即可重新抓取行情")

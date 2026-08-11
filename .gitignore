@@ -26,6 +26,7 @@ journal.db
 # ===== 运行时文件 =====
 *.pid
 网页服务.pid
+局域网共享.flag
 
 # ===== Python =====
 __pycache__/
