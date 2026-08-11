@@ -23,9 +23,10 @@ RE_M106 = re.compile(r'\bM106\b', re.IGNORECASE)
 RE_M88 = re.compile(r'\bM88\b', re.IGNORECASE)
 # 规则5：M135 → M109
 RE_M135 = re.compile(r'\bM135\b', re.IGNORECASE)
-# 规则6：G101A54./G101A54 → 查找后续 G54~G59 并合并为 G0G90G5yB0.
+# 规则6：G101A54./G101A54 → 查找后续 G54~G59 并合并为 G90G0G5yB0
 RE_G101 = re.compile(r'^\s*G101\s*A5[4-9]\.?(?!\d)', re.IGNORECASE)
-RE_G5X = re.compile(r'\bG(5[4-9])\b', re.IGNORECASE)
+# G54~G59 可能紧跟轴字母（如 G54X...），但不能跟数字（G540 不算）
+RE_G5X = re.compile(r'G(5[4-9])(?![0-9])', re.IGNORECASE)
 # 规则7：G104Hn + G43Z...H#505 → G43Z...Hn
 RE_G104 = re.compile(r'^\s*G104\s*H(\d+)', re.IGNORECASE)
 RE_G43_H505 = re.compile(r'^\s*G43\s*Z(-?[\d.]+)\s*H#505', re.IGNORECASE)
@@ -45,7 +46,7 @@ STAT_LABELS = (
     ("m106", "M106→M06"),
     ("m88", "M88→M07"),
     ("m135", "M135→M109"),
-    ("g101", "G101→G0G90G5yB0."),
+    ("g101", "G101→G90G0G5yB0"),
     ("g104", "G104+G43 合并"),
 )
 
@@ -105,7 +106,7 @@ def process_gcode(input_file, output_file):
         modified_line, cnt = RE_M135.subn('M109', modified_line)
         stats["m135"] += cnt
 
-        # 规则6：G101A54.Bxxx / G101A54Bxxx → G0G90G5yB0.（保留 G52）
+        # 规则6：G101A54.Bxxx / G101A54Bxxx → G90G0G5yB0（保留 G52）
         if RE_G101.match(modified_line.strip()):
             j = i + 1
             found = False
@@ -125,7 +126,7 @@ def process_gcode(input_file, output_file):
                 if match:
                     g5y = match.group(1)
                     new_lines.extend(temp_lines)
-                    new_lines.append(f"G0G90G{g5y}B0.\n")
+                    new_lines.append(f"G90G0G{g5y}B0\n")
                     i = j
                     found = True
                     break

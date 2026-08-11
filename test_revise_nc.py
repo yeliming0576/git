@@ -53,12 +53,19 @@ class RuleTest(unittest.TestCase):
             "G101A54.B45.\n(注释)\nG0X100.\nG54\nG0Z5.\n")
         # 原语义：G54~G59 行保留（“保留 G52”），替换行插入在其前
         self.assertEqual(out,
-                         "(注释)\nG0X100.\nG0G90G54B0.\nG54\nG0Z5.\n")
+                         "(注释)\nG0X100.\nG90G0G54B0\nG54\nG0Z5.\n")
         self.assertEqual(stats["g101"], 1)
 
     def test_g101_without_dot(self):
         out, stats = run_convert("G101A54B45.\nG55\n")
-        self.assertEqual(out, "G0G90G55B0.\nG55\n")
+        self.assertEqual(out, "G90G0G55B0\nG55\n")
+        self.assertEqual(stats["g101"], 1)
+
+    def test_g101_g54_followed_by_axis_letter(self):
+        # 回归：G54 后紧跟轴字母（无空格）也必须能识别
+        out, stats = run_convert(
+            "G101A54.B0.\nG0G90G54X-315.007Y322.\n")
+        self.assertEqual(out, "G90G0G54B0\nG0G90G54X-315.007Y322.\n")
         self.assertEqual(stats["g101"], 1)
 
     def test_g101_not_found(self):
