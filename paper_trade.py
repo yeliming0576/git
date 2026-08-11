@@ -46,6 +46,78 @@ def today_str():
     return datetime.date.today().strftime("%Y-%m-%d")
 
 
+def _ledger(initial_equity=EQUITY):
+    """按成交流水还原现金余额与已实现收益（FIFO 配对）。
+    买入：现金 -= 成交额+佣金；卖出：现金 += 成交额-佣金-印花税。
+    返回 (cash, realized_returns%)。"""
+    conn = journal._connect()
+    try:
+        rows = conn.execute(
+            "SELECT code, side, exec_price, shares, commission, stamp_tax "
+            "FROM trades WHERE reject_reason IS NULL ORDER BY id").fetchall()
+    finally:
+        conn.close()
+    cash = float(initial_equity)
+    fifo = {}
+    realized = []
+    for r in rows:
+        px = float(r["exec_price"] or 0)
+        sh = int(r["shares"] or 0)
+        comm = float(r["commission"] or 0)
+        stamp = float(r["stamp_tax"] or 0)
+        if sh <= 0:
+            continue
+        if r["side"] == "BUY":
+            cost = px * sh + comm
+            cash -= cost
+            fifo.setdefault(r["code"], []).append([sh, cost / sh])
+        else:
+            proceeds = px * sh - comm - stamp
+            cash += proceeds
+            q = fifo.setdefault(r["code"], [])
+            remaining = sh
+            cost_basis = 0.0
+            while remaining > 0 and q:
+                lot = q[0]
+                take = min(lot[0], remaining)
+                cost_basis += take * lot[1]
+                lot[0] -= take
+                remaining -= take
+                if lot[0] <= 0:
+                    q.pop(0)
+            if cost_basis:
+                realized.append((proceeds - cost_basis) / cost_basis * 100)
+    return round(cash, 2), realized
+
+
+def _mark_prices(positions):
+    """持仓按最新价估值；行情失败回退日K收盘价，再失败用成本价。"""
+    prices = {}
+    for code in positions:
+        try:
+            prices[code] = Q.fetch_quote(code)["price"]
+        except Exception:
+            try:
+                rows = history.get_history(code, "hfq")
+                prices[code] = rows[-1]["close"]
+            except Exception:
+                prices[code] = positions[code]["avg_entry"]
+    return prices
+
+
+def _industry_weights(positions, prices, equity):
+    """当前持仓的行业权重（用于 L2 行业超限检查）"""
+    w = {}
+    for code, d in positions.items():
+        mv = int(d["shares"]) * float(prices.get(code, d["avg_entry"]))
+        try:
+            ind = selection.fetch_stock_industry(code) or "未知"
+        except Exception:
+            ind = "未知"
+        w[ind] = w.get(ind, 0.0) + mv
+    return {k: v / equity for k, v in w.items()} if equity > 0 else w
+
+
 def execute_pending(rows_map):
     """T+1 开盘执行昨日挂单（模拟）：用当日开盘价成交，涨跌停/停牌顺延"""
     today = today_str()
@@ -157,24 +229,51 @@ def main():
     journal.save_pending(today, orders)
     print(f"已生成订单 {len(orders)} 笔（T+1 开盘执行）")
 
-    # 7) 风控快照 + 净值
+    # 7) 风控快照 + 净值（按持仓现价 mark-to-market）
+    positions = journal.current_positions()
+    cash, realized_rets = _ledger(EQUITY)
+    prices = _mark_prices(positions)
+    position_mv = sum(int(d["shares"]) * float(prices.get(code, d["avg_entry"]))
+                      for code, d in positions.items())
+    equity_now = round(cash + position_mv, 2)
+    prev_row = journal._connect().execute(
+        "SELECT equity FROM daily_nav ORDER BY date DESC LIMIT 1").fetchone()
+    prev_equity = prev_row["equity"] if prev_row else EQUITY
+    day_return = equity_now / prev_equity - 1 if prev_equity else 0.0
+    nav_series = [r["equity"] for r in journal._connect().execute(
+        "SELECT equity FROM daily_nav ORDER BY date").fetchall()] + [equity_now]
     actions = []
     for code, d in positions.items():
-        q = {"price": 0.0, "open": None}
-        actions += risk_monitor.check_stock(code, portfolio_builder.Position(
-            code=code, shares=d["shares"], entry=d["avg_entry"]), q)
-    actions += risk_monitor.check_portfolio({}, {}, EQUITY, total_risk=stats["total_risk"] / 100)
-    nav = journal._connect().execute("SELECT equity FROM daily_nav ORDER BY date DESC LIMIT 1").fetchone()
-    equity = nav["equity"] if nav else EQUITY
-    journal.update_nav(today, equity, equity, 0.0, None, stats["total_risk"] / 100)
+        quote = {"price": float(prices.get(code, 0) or 0), "open": None}
+        rows = None
+        atr22 = 0.0
+        try:
+            rows = history.get_history(code, "hfq")
+            atr22 = Q.atr(rows, 22)[-1] or 0.0
+        except Exception:
+            pass
+        actions += risk_monitor.check_stock(
+            code, portfolio_builder.Position(code=code, shares=d["shares"],
+                                              entry=d["avg_entry"]),
+            quote, rows=rows, atr22=atr22)
+    ind_w = _industry_weights(positions, prices, equity_now)
+    actions += risk_monitor.check_portfolio(
+        positions, prices, equity_now, day_return=day_return,
+        industry_weight=ind_w, total_risk=stats["total_risk"] / 100)
+    actions += risk_monitor.check_system(nav_series, realized_rets, signal_deviation=None)
+    journal.update_nav(today, equity_now, round(cash, 2), round(position_mv, 2),
+                       None, stats["total_risk"] / 100)
+    print(f"组合净值: {equity_now:.2f} 元（现金 {cash:.2f} + 持仓市值 {position_mv:.2f}，"
+          f"今日 {day_return:+.2%}）")
     for a in actions:
         print("风控:", a)
-    render_report(today, targets, stats, orders, actions, cands, excluded)
+    render_report(today, targets, stats, orders, actions, cands, excluded, equity_now)
     _prog(99, "组合报告已生成")
     print("组合报告已生成: 组合与执行报告.html")
 
 
-def render_report(today, targets, stats, orders, actions, cands, excluded):
+def render_report(today, targets, stats, orders, actions, cands, excluded, equity=None):
+    equity = equity or EQUITY
     rows = ""
     for code, sh in targets.items():
         c = next((x for x in cands if x.code == code), None)
@@ -206,7 +305,7 @@ h2{{font-size:18px;margin:20px 0 4px;color:#2563eb;border-left:3px solid #2563eb
 .warn{{background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px 16px;font-size:13px;color:#92400e;}}
 </style></head><body><div class="wrap">
 <h1>组合与执行报告（模拟盘）</h1>
-<div class="sub">生成时间 {today} · 总权益 1,000,000 元 · 按《组合与执行规范》：热度=L4出口剔除、15~20只、单票≤10%、风险预算1%、成本0.30%往返</div>
+<div class="sub">生成时间 {today} · 总权益 {equity:,.0f} 元（按持仓现价估值） · 按《组合与执行规范》：热度=L4出口剔除、15~20只、单票≤10%、风险预算1%、成本0.30%往返</div>
 <div class="cards">
   <div class="card"><div class="n">{stats['n']}</div><div class="l">目标持仓数</div></div>
   <div class="card"><div class="n">{stats['total_risk']}%</div><div class="l">组合风险敞口</div></div>
