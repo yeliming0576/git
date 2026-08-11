@@ -340,8 +340,10 @@ def build_quick_review_html(packs):
         if not p:
             continue
         verdict, items = quality_verdict(p)
-        pe = f"{p['pe']:.2f}" if p.get("pe") else "—"
-        pb = f"{p['pb']:.2f}" if p.get("pb") else "—"
+        pe_raw = p.get("pe")
+        pe = f"{pe_raw:.2f}" if pe_raw and pe_raw > 0 else ("亏损" if pe_raw and pe_raw <= 0 else "—")
+        pb_raw = p.get("pb")
+        pb = f"{pb_raw:.2f}" if pb_raw and pb_raw > 0 else ("—" if pb_raw is None else "异常")
         pos = "—"
         if p.get("high_52w") and p.get("low_52w") and p.get("price"):
             rng = p["high_52w"] - p["low_52w"]
@@ -401,6 +403,9 @@ def build_task_pack(pack, quant=None):
     date8 = datetime.date.today().strftime("%Y%m%d")
     verify = pack.get("verify") or {}
     fins = pack.get("financials") or []
+    pe_raw = pack.get("pe")
+    pe_txt = (f"{pe_raw:.2f}" if pe_raw and pe_raw > 0
+              else ("亏损" if pe_raw and pe_raw <= 0 else "—"))
     if quant is None:
         quant = _quant_summary(code)
     master = None
@@ -430,7 +435,7 @@ def build_task_pack(pack, quant=None):
 | 现价 | {pack.get('price', '—')} 元（{_fmt_pct(pack.get('change_pct'))}） |
 | 总市值 | {_fmt(pack.get('market_cap_yi'), 2)} 亿 |
 | 流通市值 | {_fmt(pack.get('float_cap_yi'), 2)} 亿 |
-| PE / PB | {pack.get('pe') or '—'} / {pack.get('pb') or '—'} |
+| PE / PB | {pe_txt} / {pack.get('pb') or '—'} |
 | 换手率 / 成交额 | {_fmt_pct(pack.get('turnover_rate'))} / {_fmt(pack.get('amount_yi'), 2)} 亿 |
 | 52 周区间 | {pack.get('low_52w') or '—'} ~ {pack.get('high_52w') or '—'} |
 | 市值验算 | {verify.get('note', '—')} |
