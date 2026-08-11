@@ -330,11 +330,29 @@ ul{{line-height:1.9;}} a{{color:#2563eb;}}
         self.wfile.write(body)
 
 
+class Server(ThreadingHTTPServer):
+    """关闭 SO_REUSEADDR，避免 Windows 下多个服务实例同时绑定同一端口。"""
+    allow_reuse_address = False
+
+
+def port_in_use(port):
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
 def main():
     parse_port()
     no_browser = "--no-browser" in sys.argv
+    if port_in_use(PORT):
+        print(f"端口 {PORT} 已被占用，服务可能已在运行。")
+        if not no_browser:
+            webbrowser.open(f"http://127.0.0.1:{PORT}/")
+        return
     try:
-        server = ThreadingHTTPServer((HOST, PORT), Handler)
+        server = Server((HOST, PORT), Handler)
     except OSError:
         print(f"端口 {PORT} 已被占用，服务可能已在运行。")
         if not no_browser:
