@@ -5,6 +5,7 @@ SQLite 数据层（选股系统 v2 配套）
 数据全部存入项目内的 选股数据.db（单文件数据库，零安装、零配置）：
   - rank_history  每日三榜 Z-score 排名历史（多日持续性评分用）
   - hot_picks     每日选股结果（接口无数据时的缓存兜底）
+  - fundamental_snapshots  每日基本面快照缓存（research_data.py 使用）
 数据库不可用时自动降级到原来的 JSON 文件，不会影响运行。
 """
 import datetime
@@ -45,6 +46,12 @@ def init_db():
             total_mv REAL,
             score REAL,
             PRIMARY KEY (date, code))""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS fundamental_snapshots (
+            code TEXT NOT NULL,
+            report_date TEXT NOT NULL,
+            json TEXT,
+            fetched_at TEXT,
+            PRIMARY KEY (code, report_date))""")
         conn.commit()
     finally:
         conn.close()
@@ -165,6 +172,45 @@ def load_pick_history(days=7):
             "amount": row[5], "turnover": row[6], "pe": row[7], "total_mv": row[8],
             "score": row[9]})
     return history
+
+
+# ---------------- 基本面快照缓存（research_data.py 用） ----------------
+def save_fundamental_snapshot(code, report_date, data):
+    """保存某只股票某日期的基本面数据快照（JSON 字符串）。"""
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO fundamental_snapshots(code, report_date, json, fetched_at) "
+            "VALUES(?,?,?,?)",
+            (code, report_date, json.dumps(data, ensure_ascii=False),
+             datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def load_fundamental_snapshot(code, report_date=None):
+    """读取快照；report_date 缺省时返回该股最近一条。无数据返回 None。"""
+    conn = _connect()
+    try:
+        if report_date:
+            row = conn.execute(
+                "SELECT json FROM fundamental_snapshots "
+                "WHERE code=? AND report_date=?",
+                (code, report_date)).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT json FROM fundamental_snapshots WHERE code=? "
+                "ORDER BY report_date DESC LIMIT 1",
+                (code,)).fetchone()
+    finally:
+        conn.close()
+    if not row or not row[0]:
+        return None
+    try:
+        return json.loads(row[0])
+    except Exception:
+        return None
 
 
 def purge_code(code):

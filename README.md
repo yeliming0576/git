@@ -81,6 +81,15 @@
 
 > 规范内部矛盾修正（已在代码注释注明）：目标=入场+3ATR、止损=入场−2ATR 时盈亏比恒为 1.5<2，永远无法通过"盈亏比≥2"过滤；按规范意图将目标位改为 4×ATR（=2:1）后过滤可执行。
 
+## AI Berkshire Skill 融合（新增）
+
+项目已按"数据层 + 入口层 + 报告层"融入 ai-berkshire 21 个 Skill（详见 `技能使用手册.md`）：
+
+- **深度研究**：`深度研究.cmd 600519` 或网页 `http://127.0.0.1:8765/research?code=600519`，自动抓取行情 + 东财 F10 财务 + 52 周区间并做市值验算，生成研究任务包；把任务包交给 Codex，附言"按 investment-team + investment-research 执行深度研究"即可产出四大师 HTML 研究报告（含内部 Markdown 底稿与 `tools/report_audit.py` 抽检）。
+- **每日基本面速评**：每日报告自动新增"基本面速评"节（ROE/毛利率/净利率/负债率/PE/PB/52周位置，quality-screen 初筛规则），数据当天缓存；仅展示，不参与选股。
+- **工具**：`tools/financial_rigor.py`（精确验算）、`tools/report_audit.py`（报告抽检）来自 ai-berkshire（MIT），见 `tools/来源与许可.md`。
+- **不改动**：现有选股逻辑、组合模拟盘、回测与风控流程。
+
 ## 免责声明
 
 所有报告由公开行情数据自动生成，仅供量化研究参考，不构成投资建议。

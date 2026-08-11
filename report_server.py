@@ -25,6 +25,11 @@ LOCK = threading.Lock()   # 多人同时刷新/保存/编辑自选股时互斥�
 PID_FILE = os.path.join(BASE, "网页服务.pid")
 
 
+def _html_escape(s):
+    import html as _h
+    return _h.escape(str(s), quote=False)
+
+
 def parse_port():
     global PORT, INTERVAL
     for i, arg in enumerate(sys.argv):
@@ -126,6 +131,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/watchlist"):
             self._json({"ok": True, "codes": read_watchlist()})
             return
+        if self.path.startswith("/researchfile"):
+            self._research_file()
+            return
+        if self.path.startswith("/research"):
+            self._research()
+            return
         if self.path in ("/", "/index.html"):
             self._serve_report()
             return
@@ -163,6 +174,82 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _query(self):
+        from urllib.parse import parse_qs, urlsplit
+        return parse_qs(urlsplit(self.path).query)
+
+    def _research(self):
+        """GET /research?code=600519 → 生成并展示研究任务包 + 已生成报告入口"""
+        try:
+            from urllib.parse import unquote
+            code = (self._query().get("code") or [""])[0].strip()
+            if not (code.isdigit() and len(code) == 6):
+                self._json({"ok": False, "msg": "请输入6位股票代码，如 /research?code=600519"}, status=400)
+                return
+            import research_data
+            pack = research_data.get_pack(code)
+            task = research_data.build_task_pack(pack)
+        except Exception as e:
+            print("[服务] 研究任务包生成失败:", e)
+            self._json({"ok": False, "msg": f"数据获取失败：{e}"}, status=500)
+            return
+        d = os.path.join(BASE, "报告归档", "研究", code)
+        reports = []
+        if os.path.isdir(d):
+            reports = sorted(
+                f for f in os.listdir(d)
+                if f.endswith(".html") and "研究报告" in f)
+        report_links = "".join(
+            f"<li><a href='/researchfile?code={code}&file={unquote(f)}'>{f}</a></li>"
+            for f in reports) or "<li>暂无已生成报告（把任务包交给 Codex 执行后生成）</li>"
+        body = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>研究任务包 {code}</title>
+<style>
+body{{background:#f5f6f8;color:#1f2937;font-family:"Microsoft YaHei",sans-serif;padding:28px;}}
+.wrap{{max-width:1100px;margin:0 auto;}}
+h1{{font-size:22px;}} .sub{{color:#6b7280;font-size:13px;margin:8px 0 14px;}}
+.card{{background:#fff;border:1px solid #e6e9ef;border-radius:12px;padding:16px 20px;margin-bottom:16px;}}
+button{{background:#2563eb;color:#fff;border:none;border-radius:999px;padding:8px 18px;cursor:pointer;font-family:inherit;}}
+textarea{{width:100%;height:640px;border:1px solid #dbe2ea;border-radius:10px;padding:12px;font-size:12px;font-family:Consolas,monospace;box-sizing:border-box;}}
+ul{{line-height:1.9;}} a{{color:#2563eb;}}
+</style></head><body><div class="wrap">
+<h1>研究任务包：{_html_escape(code)}</h1>
+<div class="sub">把下面内容复制给 Codex，并附言“按 investment-team + investment-research 执行深度研究”。任务包数据自动缓存当天，不重复抓取。</div>
+<div class="card"><button onclick="var t=document.getElementById('task');t.select();document.execCommand('copy');this.textContent='已复制 ✓';">复制任务包</button></div>
+<div class="card"><textarea id="task" readonly>{_html_escape(task)}</textarea></div>
+<div class="card"><b>已生成研究报告</b><ul>{report_links}</ul>
+<div class="sub" style="margin-top:6px;">报告存放：报告归档\\研究\\{code}\\</div></div>
+</div></body></html>"""
+        data = body.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _research_file(self):
+        """GET /researchfile?code=600519&file=xx.html → 查看已生成研究报告"""
+        try:
+            from urllib.parse import unquote
+            q = self._query()
+            code = (q.get("code") or [""])[0].strip()
+            fname = (q.get("file") or [""])[0].strip()
+            fname = os.path.basename(unquote(fname))
+            path = os.path.join(BASE, "报告归档", "研究", code, fname)
+            if not (code.isdigit() and len(code) == 6) or not fname.endswith(".html") \
+                    or not os.path.isfile(path):
+                self.send_error(404, "Not Found")
+                return
+            with open(path, "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception:
+            self.send_error(500, "Server Error")
 
     def _save(self):
         with LOCK:
