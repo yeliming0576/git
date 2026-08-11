@@ -3,7 +3,6 @@
 
 import os
 import re
-import shutil
 import sys
 import tempfile
 import unittest
@@ -454,17 +453,89 @@ class RepeatStageTest(unittest.TestCase):
         self.assertEqual(out.count('T9(D16-HE-JIN-LI-XI-DAO-DJ05-0142)(1111)'), 2)
 
 
-class Integration5101Test(unittest.TestCase):
+OP1_TEXT = (
+    '% \n'
+    'O1111(TEST OP1) \n'
+    'M16\n'
+    'T29(TAN-TOU) \n'
+    'M1\n'
+    'M106 \n'
+    'T33(D80-YU-MI-XI-DAO-DP30) \n'
+    '(TAN-TOU)\n'
+    'G0G90G54X-280.Y-57.\n'
+    'G104H29\n'
+    'G43Z475.H#505\n'
+    'G65P9810Z245.F2500\n'
+    'G90G53G0Z0M5\n'
+    'M1\n'
+    'M106 \n'
+    'T50(D80-MIAN-XI-DAO) \n'
+    '(D80-YU-MI-XI-DAO-DP30)\n'
+    'G104H33\n'
+    'G43Z361.H#505\n'
+    'M1\n'
+    'M106 \n'
+    'T1(D24-YE-ZI-DAO-DJ01-0098) \n'
+    '(D80-MIAN-XI-DAO)\n'
+    'G104H50\n'
+    'G43Z361.H50\n'
+    'M1\n'
+    'M106 \n'
+    'T14(D16-HE-JIN-LI-XI-DAO-DP45-DJ05-0143) \n'
+    '(D24-YE-ZI-DAO-DJ01-0098)\n'
+    'G104H1\n'
+    'G43Z361.H1\n'
+    'M1\n'
+    'M106 \n'
+    '(D16-HE-JIN-LI-XI-DAO-DP45-DJ05-0143)\n'
+    'G104H14\n'
+    'G43Z361.H14\n'
+    'M30\n'
+    '%\n'
+)
+
+OP2_TEXT = (
+    '% \n'
+    'O2222(TEST OP2) \n'
+    'M16\n'
+    'T4(D160-MIAN-XI-DAO-F45) \n'
+    'M1\n'
+    'M106 \n'
+    'T2(D170-CU-TANG-DAO) \n'
+    '(D160-MIAN-XI-DAO-F45)\n'
+    'G104H4\n'
+    'G43Z100.H#505\n'
+    'M1\n'
+    'M106 \n'
+    'T3(D16-HE-JIN-ZUAN-DP40) \n'
+    '(D170-CU-TANG-DAO)\n'
+    'G104H2\n'
+    'G43Z100.H2\n'
+    'M1\n'
+    'M106 \n'
+    'T14(D16-HE-JIN-LI-XI-DAO-DP45-DJ05-0143) \n'
+    '(D16-HE-JIN-ZUAN-DP40)\n'
+    'G104H3\n'
+    'G43Z100.H3\n'
+    'M1\n'
+    'M106 \n'
+    '(D16-HE-JIN-LI-XI-DAO-DP45-DJ05-0143)\n'
+    'G104H14\n'
+    'G43Z100.H14\n'
+    'M30\n'
+    '%\n'
+)
+
+
+class IntegrationTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        proj = os.path.dirname(os.path.abspath(__file__))
-        self.src1 = os.path.join(self.tmp.name, '5101')
-        self.src2 = os.path.join(self.tmp.name, '5102')
-        shutil.copyfile(os.path.join(proj, '5101'), self.src1)
-        shutil.copyfile(os.path.join(proj, '5102'), self.src2)
-        self.out1 = os.path.join(self.tmp.name, '5101_processed')
-        self.out2 = os.path.join(self.tmp.name, '5102_processed')
+        # 使用任意文件名，验证脚本不依赖固定文件名
+        self.src1 = write_file(os.path.join(self.tmp.name, 'OP1-AAA'), OP1_TEXT)
+        self.src2 = write_file(os.path.join(self.tmp.name, 'OP2-BBB'), OP2_TEXT)
+        self.out1 = os.path.join(self.tmp.name, 'OP1-AAA_processed')
+        self.out2 = os.path.join(self.tmp.name, 'OP2-BBB_processed')
         revise_nc.process_gcode(self.src1, self.out1)
         revise_nc.process_gcode(self.src2, self.out2)
         self.summary, self.texts = run_on([self.out1, self.out2])
@@ -486,21 +557,22 @@ class Integration5101Test(unittest.TestCase):
 
     def test_minimal_renumber_expected(self):
         text1, text2 = self.texts
-        # 5101 的 T1(D24-YE-ZI) 移入 27
-        self.assertIn('T27(D24-YE-ZI-DAO-DJ01-0098)', text1)
+        # OP1 的 T1(D24-YE-ZI) 因邻位占用移入 6
+        self.assertIn('T6(D24-YE-ZI-DAO-DJ01-0098)', text1)
         self.assertNotIn('T1(D24-YE-ZI-DAO-DJ01-0098)', text1)
-        # 5102 的 T3(D16-HE-JIN-ZUAN-DP40) 移入 29
-        self.assertIn('T29(D16-HE-JIN-ZUAN-DP40)', text2)
+        # OP2 的 T3(D16-HE-JIN-ZUAN-DP40) 移入 7
+        self.assertIn('T7(D16-HE-JIN-ZUAN-DP40)', text2)
         self.assertNotIn('T3(D16-HE-JIN-ZUAN-DP40)', text2)
-        # 大刀具保持 2/4/6，邻位 1/3/5/7 无刀具
+        # 大刀具保持 2/4，邻位 1/3/5 无刀具；共用 T14 两文件一致
         self.assertIn('T2(D170-CU-TANG-DAO)', text2)
         self.assertIn('T4(D160-MIAN-XI-DAO-F45)', text2)
-        self.assertIn('T6(D175.46-CU-TANG-DAO)', text2)
+        self.assertIn('T14(D16-HE-JIN-LI-XI-DAO-DP45-DJ05-0143)', text1)
+        self.assertIn('T14(D16-HE-JIN-LI-XI-DAO-DP45-DJ05-0143)', text2)
         occupied = set()
         for text in self.texts:
             occupied.update(int(m.group(1)) for m in
                             re.finditer(r'^T(\d+)\(', text, re.M))
-        for nb in (1, 3, 5, 7):
+        for nb in (1, 3, 5):
             self.assertNotIn(nb, occupied)
 
     def test_report_file(self):
@@ -523,15 +595,13 @@ class Integration5101Test(unittest.TestCase):
 
     def test_cli_auto_renumber(self):
         with tempfile.TemporaryDirectory() as tmp2:
-            src1 = os.path.join(tmp2, '5101')
-            src2 = os.path.join(tmp2, '5102')
-            shutil.copyfile(self.src1, src1)
-            shutil.copyfile(self.src2, src2)
+            src1 = write_file(os.path.join(tmp2, 'OP1-AAA'), OP1_TEXT)
+            src2 = write_file(os.path.join(tmp2, 'OP2-BBB'), OP2_TEXT)
             code = revise_nc.run_cli([src1, src2], output_dir=tmp2, force=True)
             self.assertEqual(code, 0)
-            self.assertTrue(os.path.isfile(os.path.join(tmp2, '5101_processed')))
+            self.assertTrue(os.path.isfile(os.path.join(tmp2, 'OP1-AAA_processed')))
             self.assertTrue(os.path.isfile(os.path.join(tmp2, 'tool_summary.txt')))
-            with open(os.path.join(tmp2, '5101_processed'), encoding='utf-8') as f:
+            with open(os.path.join(tmp2, 'OP1-AAA_processed'), encoding='utf-8') as f:
                 self.assertNotIn('TAN TOU', f.read())
 
 

@@ -188,12 +188,12 @@ def output_path_for(input_file, output_dir=None):
     return os.path.join(dir_name, f"{name}_processed{ext}")
 
 
-def _ask_settings(parent):
-    """弹窗收集后处理参数；取消返回 None。"""
-    top = tk.Toplevel(parent)
+def _ask_settings():
+    """设置窗口（直接作为主窗口弹出）；取消返回 None。"""
+    top = tk.Tk()
     top.title("后处理设置")
-    top.transient(parent)
-    top.grab_set()
+    top.resizable(False, False)
+    top.attributes('-topmost', True)
 
     tk.Label(top, text="刀库容量（最大刀号）:").grid(
         row=0, column=0, padx=8, pady=6, sticky="w")
@@ -242,28 +242,46 @@ def _ask_settings(parent):
         row=4, column=0, padx=8, pady=8)
     tk.Button(top, text="取消", command=on_cancel, width=8).grid(
         row=4, column=1, padx=8, pady=8)
+    top.update_idletasks()
+    w = top.winfo_width()
+    h = top.winfo_height()
+    x = (top.winfo_screenwidth() - w) // 2
+    y = (top.winfo_screenheight() - h) // 3
+    top.geometry(f"+{x}+{y}")
+    top.deiconify()
+    top.lift()
+    top.focus_force()
     top.wait_window()
     return result or None
 
 
 def run_gui():
     """图形界面入口：可选择多个文件一起处理，并设置后处理参数。"""
-    root = tk.Tk()
-    root.withdraw()
-
-    settings = _ask_settings(root)
+    print("正在打开后处理设置窗口…")
+    try:
+        settings = _ask_settings()
+    except Exception as e:
+        print(f"无法打开图形界面：{e}")
+        print("可改用命令行方式：python revise_nc.py 文件1 文件2 ...")
+        return
     if settings is None:
+        print("已取消。")
         return
 
+    root = tk.Tk()
+    root.withdraw()
     file_paths = filedialog.askopenfilenames(
+        parent=root,
         title="选择要处理的 NC 文件（可多选，作为同一组处理）",
         filetypes=[("NC files", "*.nc *.NC"), ("Text files", "*.txt"),
                    ("All files", "*.*")]
     )
+    root.destroy()
     if not file_paths:
-        messagebox.showinfo("提示", "未选择文件，程序退出。")
+        print("未选择文件，程序退出。")
         return
 
+    print(f"已选择 {len(file_paths)} 个文件，开始处理…")
     processed = []
     for file_path in file_paths:
         output_path = output_path_for(file_path)
@@ -271,6 +289,7 @@ def run_gui():
             if not messagebox.askyesno(
                     "确认覆盖",
                     f"输出文件已存在：\n{output_path}\n\n是否覆盖？"):
+                print(f"跳过（输出已存在）: {output_path}")
                 continue
         try:
             stats = process_gcode(file_path, output_path)
@@ -280,7 +299,7 @@ def run_gui():
             messagebox.showerror("错误", f"处理失败：{file_path}\n{e}")
 
     if not processed:
-        messagebox.showinfo("提示", "没有文件被处理。")
+        print("没有文件被处理。")
         return
 
     try:
@@ -290,12 +309,14 @@ def run_gui():
             large_diameter=settings['large_diameter'],
             remove_probe=settings['remove_probe'],
             repeat_stage=settings['repeat_stage'])
+        print(f"后处理完成，报告：{summary['report_path']}")
         messagebox.showinfo(
             "完成",
             f"处理与后处理完成！\n共 {len(processed)} 个文件。\n"
             f"报告：{summary['report_path']}\n\n"
             f"（探头删除、刀号重排、空行清理明细见 tool_summary.txt）")
     except Exception as e:
+        print(f"后处理失败：{e}")
         messagebox.showerror("错误", f"后处理失败：\n{e}")
 
 
