@@ -1,5 +1,6 @@
 @echo off
-set "LOG=%~dp0自动运行日志.txt"
+if not exist "%~dp0日志" mkdir "%~dp0日志"
+set "LOG=%~dp0日志\自动运行日志.txt"
 echo [%date% %time%] ====== 开始自动运行 ====== >> "%LOG%"
 call "%~dp0_python.cmd"
 if errorlevel 1 (

@@ -5,7 +5,8 @@ import os
 
 import selection
 
-OUT_DIR = os.path.dirname(os.path.abspath(__file__))
+OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "报告归档", "每日")
+os.makedirs(OUT_DIR, exist_ok=True)
 
 
 def main():

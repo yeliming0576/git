@@ -31,10 +31,12 @@ import selection  # noqa: E402
 import tracking  # noqa: E402
 import v2  # noqa: E402
 
-OUT_DIR = BASE
+REPORT_DIR = os.path.join(BASE, "报告归档", "每日")
+os.makedirs(REPORT_DIR, exist_ok=True)
+OUT_DIR = REPORT_DIR
 WATCH_FILE = os.path.join(BASE, "自选股.txt")
 FIXED = [("605060", "联德精密(固定关注)")]
-CACHE_FILE = os.path.join(BASE, "热门股缓存.json")
+CACHE_FILE = os.path.join(os.path.join(BASE, "数据"), "热门股缓存.json")
 
 
 def _prog(pct, msg):

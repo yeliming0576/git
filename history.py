@@ -18,7 +18,9 @@ HEADERS = {
 }
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE, "选股数据.db")
+DATA_DIR = os.path.join(BASE, "数据")
+os.makedirs(DATA_DIR, exist_ok=True)
+DB_PATH = os.path.join(DATA_DIR, "选股数据.db")
 YEARS = 8
 
 

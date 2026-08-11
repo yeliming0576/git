@@ -15,7 +15,9 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE)
 import progress  # noqa: E402
 
-LOG = os.path.join(BASE, "自动运行日志.txt")
+LOG_DIR = os.path.join(BASE, "日志")
+os.makedirs(LOG_DIR, exist_ok=True)
+LOG = os.path.join(LOG_DIR, "自动运行日志.txt")
 
 
 def log(msg):
@@ -85,7 +87,7 @@ def main():
         msg_var.set(msg)
         if stage == "完成":
             stage_var.set("完成  100%")
-            msg_var.set("报告已更新，可查看：自动运行日志.txt")
+            msg_var.set("报告已更新，可查看：日志\\自动运行日志.txt")
             root.after(2500, root.destroy)
         elif stage == "出错":
             msg_var.set(msg)

@@ -17,6 +17,8 @@ import selection
 import v2
 
 BASE = os.path.dirname(os.path.abspath(__file__))
+REPORT_DIR = os.path.join(BASE, "报告归档", "组合")
+os.makedirs(REPORT_DIR, exist_ok=True)
 EQUITY = 1000000.0           # 模拟总权益（元）
 WATCH_FILE = os.path.join(BASE, "自选股.txt")
 FIXED = ["605060"]
@@ -349,7 +351,7 @@ h2{{font-size:18px;margin:20px 0 4px;color:#2563eb;border-left:3px solid #2563eb
 <div class="warn">模拟盘说明：订单 T 日生成、T+1 开盘执行；涨跌停/停牌顺延；三级风控已接通真实数据并记录到 journal.risk_log。<br>
 实盘门槛：模拟运行 ≥90 天（当前 {run_days} 天）；风控实际触发 ≥1 次（当前 {risk_count} 次）；信号一致率>95%、成交率>90%、平均滑点<15bps。达标前不接实盘。</div>
 </div></body></html>"""
-    with open(os.path.join(BASE, "组合与执行报告.html"), "w", encoding="utf-8") as f:
+    with open(os.path.join(REPORT_DIR, "组合与执行报告.html"), "w", encoding="utf-8") as f:
         f.write(html)
 
 

@@ -10,7 +10,8 @@ import datetime
 import quant_engine as Q
 from daily_report import build_report_html
 
-OUT_DIR = os.path.dirname(os.path.abspath(__file__))
+OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "报告归档", "个股")
+os.makedirs(OUT_DIR, exist_ok=True)
 
 
 def main():

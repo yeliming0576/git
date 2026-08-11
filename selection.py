@@ -31,8 +31,9 @@ import quant_engine as Q
 import db
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-HISTORY_FILE = os.path.join(BASE, "排名历史.json")
-CACHE_FILE = os.path.join(BASE, "热门股缓存.json")
+DATA_DIR = os.path.join(BASE, "数据")
+HISTORY_FILE = os.path.join(DATA_DIR, "排名历史.json")
+CACHE_FILE = os.path.join(DATA_DIR, "热门股缓存.json")
 
 # ============ 可调参数（想改规则只改这里） ============
 PRICE_MEDIAN_MULTIPLE = 2.5   # 股价上限 = 全市场股价中位数 × 倍数

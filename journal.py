@@ -10,7 +10,9 @@ import sqlite3
 import statistics
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE, "journal.db")
+DATA_DIR = os.path.join(BASE, "数据")
+os.makedirs(DATA_DIR, exist_ok=True)
+DB_PATH = os.path.join(DATA_DIR, "journal.db")
 
 
 def _connect():

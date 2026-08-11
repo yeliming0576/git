@@ -91,11 +91,14 @@ def lan_ip():
 
 
 def latest_report():
-    files = [f for f in os.listdir(BASE)
+    d = os.path.join(BASE, "报告归档", "每日")
+    if not os.path.isdir(d):
+        return None
+    files = [f for f in os.listdir(d)
              if f.startswith("每日量化选股报告_") and f.endswith(".html")]
     if not files:
         return None
-    return os.path.join(BASE, sorted(files)[-1])
+    return os.path.join(d, sorted(files)[-1])
 
 
 def watchlist_file():

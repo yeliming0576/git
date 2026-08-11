@@ -18,9 +18,11 @@ import os
 import sqlite3
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE, "选股数据.db")
-HISTORY_JSON = os.path.join(BASE, "排名历史.json")
-PICKS_JSON = os.path.join(BASE, "热门股缓存.json")
+DATA_DIR = os.path.join(BASE, "数据")
+os.makedirs(DATA_DIR, exist_ok=True)
+DB_PATH = os.path.join(DATA_DIR, "选股数据.db")
+HISTORY_JSON = os.path.join(DATA_DIR, "排名历史.json")
+PICKS_JSON = os.path.join(DATA_DIR, "热门股缓存.json")
 
 
 def _connect():

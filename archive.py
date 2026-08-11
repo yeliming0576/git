@@ -10,6 +10,8 @@ import zipfile
 
 ARCHIVE_DIR_NAME = "报告归档"
 DEFAULT_KEEP_DAYS = 30
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_ARCHIVE_DIR = os.path.join(PROJECT_ROOT, ARCHIVE_DIR_NAME)
 PATTERNS = [
     r"每日量化选股报告_(\d{8})\.html",
     r"每日热门股_(\d{8})\.txt",
@@ -17,10 +19,10 @@ PATTERNS = [
 ]
 
 
-def archive_old_reports(base, keep_days=DEFAULT_KEEP_DAYS):
-    """把 base 下超过 keep_days 天的报告文件移入月度 zip，返回归档数量"""
+def archive_old_reports(base, keep_days=DEFAULT_KEEP_DAYS,
+                        archive_dir=DEFAULT_ARCHIVE_DIR):
+    """把 base 下超过 keep_days 天的报告文件移入项目根 报告归档/YYYY-MM.zip"""
     today = datetime.date.today()
-    archive_dir = os.path.join(base, ARCHIVE_DIR_NAME)
     os.makedirs(archive_dir, exist_ok=True)
     archived = 0
     for name in os.listdir(base):

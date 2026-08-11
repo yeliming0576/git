@@ -12,7 +12,8 @@ import os
 import quant_engine as Q
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(BASE, "联德股份_量化交易分析报告.html")
+OUT = os.path.join(BASE, "报告归档", "个股", "联德股份_量化交易分析报告.html")
+os.makedirs(os.path.dirname(OUT), exist_ok=True)
 CODE = "605060"
 
 
