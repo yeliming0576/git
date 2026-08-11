@@ -12,6 +12,8 @@ import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
+import renumber_nc
+
 # ==================== 规则正则（预编译） ====================
 # 规则1：删除包含 IF[ABS 的行
 RE_IF_ABS = re.compile(r'IF\[ABS', re.IGNORECASE)
@@ -186,40 +188,124 @@ def output_path_for(input_file, output_dir=None):
     return os.path.join(dir_name, f"{name}_processed{ext}")
 
 
+def _ask_settings(parent):
+    """弹窗收集后处理参数；取消返回 None。"""
+    top = tk.Toplevel(parent)
+    top.title("后处理设置")
+    top.transient(parent)
+    top.grab_set()
+
+    tk.Label(top, text="刀库容量（最大刀号）:").grid(
+        row=0, column=0, padx=8, pady=6, sticky="w")
+    max_var = tk.StringVar(value="60")
+    tk.Entry(top, textvariable=max_var, width=12).grid(
+        row=0, column=1, padx=8, pady=6)
+
+    tk.Label(top, text="大直径阈值:").grid(
+        row=1, column=0, padx=8, pady=6, sticky="w")
+    diam_var = tk.StringVar(value="125")
+    tk.Entry(top, textvariable=diam_var, width=12).grid(
+        row=1, column=1, padx=8, pady=6)
+
+    probe_var = tk.BooleanVar(value=True)
+    tk.Checkbutton(top, text="删除探头(TAN-TOU)程序段",
+                   variable=probe_var).grid(
+        row=2, column=0, columnspan=2, padx=8, pady=6, sticky="w")
+
+    repeat_var = tk.BooleanVar(value=True)
+    tk.Checkbutton(top, text="换刀前重复备刀",
+                   variable=repeat_var).grid(
+        row=3, column=0, columnspan=2, padx=8, pady=6, sticky="w")
+
+    result = {}
+
+    def on_ok():
+        try:
+            max_tools = int(max_var.get().strip())
+            large_diameter = float(diam_var.get().strip())
+            if max_tools < 1 or large_diameter < 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("错误", "刀库容量需为正整数，大直径阈值需为非负数",
+                                 parent=top)
+            return
+        result['max_tools'] = max_tools
+        result['large_diameter'] = large_diameter
+        result['remove_probe'] = probe_var.get()
+        result['repeat_stage'] = repeat_var.get()
+        top.destroy()
+
+    def on_cancel():
+        top.destroy()
+
+    tk.Button(top, text="确定", command=on_ok, width=8).grid(
+        row=4, column=0, padx=8, pady=8)
+    tk.Button(top, text="取消", command=on_cancel, width=8).grid(
+        row=4, column=1, padx=8, pady=8)
+    top.wait_window()
+    return result or None
+
+
 def run_gui():
-    """图形界面入口：选择单个文件处理。"""
+    """图形界面入口：可选择多个文件一起处理，并设置后处理参数。"""
     root = tk.Tk()
     root.withdraw()
-    file_path = filedialog.askopenfilename(
-        title="选择要处理的 NC 文件",
+
+    settings = _ask_settings(root)
+    if settings is None:
+        return
+
+    file_paths = filedialog.askopenfilenames(
+        title="选择要处理的 NC 文件（可多选，作为同一组处理）",
         filetypes=[("NC files", "*.nc *.NC"), ("Text files", "*.txt"),
                    ("All files", "*.*")]
     )
-    if not file_path:
+    if not file_paths:
         messagebox.showinfo("提示", "未选择文件，程序退出。")
         return
 
-    output_path = output_path_for(file_path)
-    if os.path.exists(output_path):
-        if not messagebox.askyesno(
-                "确认覆盖",
-                f"输出文件已存在：\n{output_path}\n\n是否覆盖？"):
-            messagebox.showinfo("提示", "已取消处理。")
-            return
+    processed = []
+    for file_path in file_paths:
+        output_path = output_path_for(file_path)
+        if os.path.exists(output_path):
+            if not messagebox.askyesno(
+                    "确认覆盖",
+                    f"输出文件已存在：\n{output_path}\n\n是否覆盖？"):
+                continue
+        try:
+            stats = process_gcode(file_path, output_path)
+            print(f"OK     {file_path} -> {output_path}")
+            processed.append(output_path)
+        except Exception as e:
+            messagebox.showerror("错误", f"处理失败：{file_path}\n{e}")
+
+    if not processed:
+        messagebox.showinfo("提示", "没有文件被处理。")
+        return
 
     try:
-        stats = process_gcode(file_path, output_path)
+        summary = renumber_nc.run(
+            processed,
+            max_tools=settings['max_tools'],
+            large_diameter=settings['large_diameter'],
+            remove_probe=settings['remove_probe'],
+            repeat_stage=settings['repeat_stage'])
         messagebox.showinfo(
             "完成",
-            f"处理完成！\n输出文件：{output_path}\n\n{format_stats(stats)}")
+            f"处理与后处理完成！\n共 {len(processed)} 个文件。\n"
+            f"报告：{summary['report_path']}\n\n"
+            f"（探头删除、刀号重排、空行清理明细见 tool_summary.txt）")
     except Exception as e:
-        messagebox.showerror("错误", f"处理过程中发生错误：\n{e}")
+        messagebox.showerror("错误", f"后处理失败：\n{e}")
 
 
-def run_cli(files, output_dir=None, force=False):
+def run_cli(files, output_dir=None, force=False, max_tools=60,
+            large_diameter=125.0, remove_probe=True, repeat_stage=True,
+            renumber=True):
     """命令行批量入口，逐文件处理并报告结果，返回进程退出码。"""
     exit_code = 0
     ok = skipped = failed = 0
+    processed = []
     for file_path in files:
         if not os.path.isfile(file_path):
             print(f"ERROR  文件不存在: {file_path}", file=sys.stderr)
@@ -241,8 +327,24 @@ def run_cli(files, output_dir=None, force=False):
             for line in format_stats(stats).splitlines():
                 print(f"       {line}")
             ok += 1
+            processed.append(output_path)
         except Exception as e:
             print(f"ERROR  {file_path}: {e}", file=sys.stderr)
+            failed += 1
+            exit_code = 1
+
+    if renumber and processed:
+        try:
+            summary = renumber_nc.run(
+                processed,
+                max_tools=max_tools,
+                large_diameter=large_diameter,
+                remove_probe=remove_probe,
+                repeat_stage=repeat_stage)
+            print(f"\n后处理（探头删除/刀号重排/空行清理）：{len(processed)} 个文件")
+            print(f"报告：{summary['report_path']}")
+        except Exception as e:
+            print(f"ERROR  后处理失败: {e}", file=sys.stderr)
             failed += 1
             exit_code = 1
 
@@ -259,13 +361,31 @@ def build_parser():
                         default=None, help="输出目录（默认与源文件同目录）")
     parser.add_argument("--force", action="store_true",
                         help="输出文件已存在时强制覆盖")
+    parser.add_argument("--max-tools", type=int, default=60, metavar="数量",
+                        help="刀库容量/最大刀号（默认 60）")
+    parser.add_argument("--large-diameter", type=float, default=125.0,
+                        metavar="直径", help="大直径刀具阈值（默认 125）")
+    parser.add_argument("--no-remove-probe", action="store_true",
+                        help="不删除 TAN-TOU 探头程序段")
+    parser.add_argument("--no-repeat-stage", action="store_true",
+                        help="换刀 M06 前不重复备刀")
+    parser.add_argument("--no-renumber", action="store_true",
+                        help="处理后不执行刀号重排/探头删除后处理")
     return parser
 
 
 def main(argv=None):
     """命令行入口（不直接调用 GUI）。"""
     args = build_parser().parse_args(argv)
-    return run_cli(args.files, args.output_dir, args.force)
+    return run_cli(
+        args.files,
+        output_dir=args.output_dir,
+        force=args.force,
+        max_tools=args.max_tools,
+        large_diameter=args.large_diameter,
+        remove_probe=not args.no_remove_probe,
+        repeat_stage=not args.no_repeat_stage,
+        renumber=not args.no_renumber)
 
 
 def entry(argv=None):
