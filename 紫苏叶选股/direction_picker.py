@@ -75,10 +75,11 @@ def available_directions():
 
 
 def find_draft(direction):
-    """按方向名查找底稿文件路径；找不到返回 None"""
+    """按方向名查找底稿文件路径；优先正式底稿（非自动近似）；找不到返回 None"""
     if not os.path.isdir(DRAFT_DIR):
         return None
     direction = direction.strip()
+    best = None
     for f in os.listdir(DRAFT_DIR):
         if not (f.endswith(".json") and "研究底稿" in f):
             continue
@@ -89,8 +90,10 @@ def find_draft(direction):
         except Exception:
             topic = f
         if direction in topic or topic in direction:
-            return path
-    return None
+            if "自动近似" not in topic:
+                return path
+            best = best or path
+    return best
 
 
 def make_task_order(direction):
@@ -123,10 +126,19 @@ def run_direction(direction, outdir=None):
     """主入口：找到底稿则直接出看板；否则生成任务单。返回 dict 结果"""
     direction = direction.strip()
     path = find_draft(direction)
+    auto = False
+    if not path:
+        try:
+            import auto_draft
+            path = auto_draft.auto_draft_for(direction)
+            auto = path is not None
+        except Exception:
+            path = None
     if path:
-        outdir, slug, results = BP.run_draft(path, topic=direction, outdir=outdir)
+        outdir, slug, results = BP.run_draft(path, topic=None if auto else direction,
+                                             outdir=outdir)
         return {"ok": True, "direction": direction, "draft": path,
-                "outdir": outdir, "slug": slug, "results": results}
+                "outdir": outdir, "slug": slug, "results": results, "auto": auto}
     order = make_task_order(direction)
     return {"ok": False, "direction": direction, "task_order": order,
             "available": available_directions()}
@@ -150,7 +162,10 @@ def main(argv):
         outdir = argv[3]
     r = run_direction(direction, outdir=outdir)
     if r["ok"]:
-        print(f"✅ 方向「{direction}」已有研究底稿，看板已生成：")
+        if r.get("auto"):
+            print(f"✅ 已自动生成近似底稿并出看板（自动近似模式，未经一手核验）：")
+        else:
+            print(f"✅ 方向「{direction}」已有研究底稿，看板已生成：")
         print("  ", r["outdir"])
         for x in r["results"]:
             print(f"   {x['code']} {x['name']} [{x['rating']}] {x['strength']}★ {x['verdict']}")
