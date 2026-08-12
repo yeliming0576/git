@@ -121,26 +121,43 @@ def _latest_bottleneck():
         return None
 
 
-def _logic_compare_html(picks):
+def _logic_compare_html(picks, slide_of=None):
     """两种选股逻辑推荐对比：量化（今日热门） vs 紫苏叶（最近看板）"""
+    slide_of = slide_of or {}
     bn = _latest_bottleneck()
-    quant_rows = "".join(
-        f"<tr><td>{html.escape(p[0])}</td><td>{html.escape(p[1])}</td>"
-        f"<td>{p[2]:.2f}</td><td>{p[3]:+.2f}%</td></tr>"
-        for p in picks) or "<tr><td colspan='4'>今日无热门选股（市场偏弱或数据不足）</td></tr>"
     bn_codes = set()
     bn_rows = ""
     if bn:
         data = bn[0]
         for r in data.get("results") or []:
             bn_codes.add(r.get("code", ""))
+
+    def _qlink(code):
+        s = slide_of.get(code)
+        return f"<a href='#' onclick=\"go({s});return false;\">量化页</a>" if s is not None else "—"
+
+    def _blink(code):
+        if code not in bn_codes:
+            return "—"
+        return f"<a href='/bottleneck#c{html.escape(code)}' target='_blank'>紫苏叶</a>"
+
+    quant_rows = "".join(
+        f"<tr><td>{html.escape(p[0])}</td><td>{html.escape(p[1])}</td>"
+        f"<td>{p[2]:.2f}</td><td>{p[3]:+.2f}%</td>"
+        f"<td>{_qlink(p[0])}</td><td>{_blink(p[0])}</td></tr>"
+        for p in picks) or "<tr><td colspan='6'>今日无热门选股（市场偏弱或数据不足）</td></tr>"
+    if bn:
+        data = bn[0]
+        for r in data.get("results") or []:
             bn_rows += (f"<tr><td>{html.escape(r.get('code',''))}</td>"
                         f"<td>{html.escape(r.get('name',''))}</td>"
                         f"<td>{html.escape(r.get('rating',''))}级</td>"
                         f"<td>{'★' * int(r.get('strength') or 0)}{'☆' * (5 - int(r.get('strength') or 0))}</td>"
-                        f"<td>{html.escape(r.get('verdict',''))}</td></tr>")
+                        f"<td>{html.escape(r.get('verdict',''))}</td>"
+                        f"<td>{_blink(r.get('code',''))}</td>"
+                        f"<td>{_qlink(r.get('code',''))}</td></tr>")
     else:
-        bn_rows = "<tr><td colspan='5'>暂无紫苏叶看板（先运行 bottleneck_picker.py）</td></tr>"
+        bn_rows = "<tr><td colspan='7'>暂无紫苏叶看板（先运行 bottleneck_picker.py）</td></tr>"
     quant_codes = {p[0] for p in picks}
     overlap = quant_codes & bn_codes
     if overlap:
@@ -152,13 +169,14 @@ def _logic_compare_html(picks):
   <div class="sub">左＝量化动量/热度逻辑（今日热门）；右＝紫苏叶瓶颈逻辑（最近看板）。</div>
   <div class="flex">
     <div class="half panel"><b>量化逻辑推荐</b>
-      <table><tr><th>代码</th><th>名称</th><th>现价</th><th>当日涨跌</th></tr>{quant_rows}</table>
+      <table><tr><th>代码</th><th>名称</th><th>现价</th><th>当日涨跌</th><th>量化页</th><th>紫苏叶对照</th></tr>{quant_rows}</table>
     </div>
     <div class="half panel"><b>紫苏叶逻辑候选</b>
-      <table><tr><th>代码</th><th>名称</th><th>瓶颈评级</th><th>信号强度</th><th>结论</th></tr>{bn_rows}</table>
+      <table><tr><th>代码</th><th>名称</th><th>瓶颈评级</th><th>信号强度</th><th>结论</th><th>看板页</th><th>量化对照</th></tr>{bn_rows}</table>
     </div>
   </div>
-  <div class="sub" style="font-weight:600;">{overlap_txt}</div>"""
+  <div class="sub" style="font-weight:600;">{overlap_txt}</div>
+  <div class="sub">链接说明：量化页=本报告该股技术分析页；紫苏叶/看板页=紫苏叶看板对应标的一页纸（需网页模式，地址栏自动定位）。</div>"""
 
 
 def build_report_html(analyses, title, note, gen_time, watch_codes=None, tracking=None,
@@ -732,7 +750,8 @@ def main():
         print("[研究] 论文状态读取失败:", e)
     bottleneck_html = _bottleneck_section()
     _prog(76, "紫苏叶看板入口完成")
-    compare_html = _logic_compare_html(picks)
+    slide_of = {code: 2 + i for i, (code, _l, _a, _a2) in enumerate(analyses)}
+    compare_html = _logic_compare_html(picks, slide_of)
     html = build_report_html(analyses, title, note, now, watch_codes=watch,
                              tracking=tracking_data, quick_html=quick_html,
                              master_html=master_html, thesis_html=thesis_html,

@@ -343,7 +343,7 @@ def build_html(draft, results, bottlenecks, generated):
         yellows = "；".join(val["yellows"]) or "无"
         greens = "；".join(val["greens"]) or "无"
         cards += f"""
-  <div class="card">
+  <div class="card" id="c{html.escape(r['code'])}">
     <h3>{html.escape(r['name'])}（{html.escape(r['code'])}）— {html.escape(r['link'])} <span class="tag">{html.escape(r['rating'])}级瓶颈</span></h3>
     <p><b>一句话定位</b>：{html.escape(r['share_mkt'] or '—')}</p>
     <p><b>为什么是瓶颈</b>：{html.escape(r['notes'] or '见研究底稿')} {cache_tag}</p>
