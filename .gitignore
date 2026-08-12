@@ -19,6 +19,7 @@ journal.db
 
 # 紫苏叶选股独立模块的输出（脚本与模板入库，输出不入库）
 紫苏叶选股/输出/
+紫苏叶选股/研究方向/
 
 # bottleneck-hunter skill 生成的瓶颈地图状态文件
 reports/

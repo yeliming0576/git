@@ -99,6 +99,7 @@ def _bottleneck_section():
   <div class="panel">
     <table><tr><th>代码</th><th>名称</th><th>瓶颈评级</th><th>信号强度</th><th>结论</th></tr>{rows}</table>
     <div class="sub" style="margin-top:8px;">完整看板：<a href="/bottleneck">网页查看</a>（服务模式）｜ 文件：紫苏叶选股\\输出\\{html.escape(dash)}</div>
+    <div class="sub" style="margin-top:6px;">方向自选：<a href="/direction">输入行业方向（如 AI算力 / 白酒 / 固态电池）生成紫苏叶看板</a></div>
   </div>"""
     except Exception as e:
         print("[紫苏叶] 看板区块读取失败:", e)

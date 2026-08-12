@@ -394,6 +394,7 @@ li{{font-size:13px;line-height:1.9;}}
 </style></head><body><div class="wrap">
 <div class="topbar">
   <a class="backbtn" href="/">← 返回主报告</a>
+  <a class="backbtn" href="/direction">方向选股</a>
   <span class="sub">紫苏叶瓶颈机会看板（独立模块）</span>
 </div>
 <h1>紫苏叶瓶颈机会看板：{html.escape(draft.get('topic',''))}</h1>
@@ -522,28 +523,10 @@ def build_md(draft, results, bottlenecks, generated):
 
 
 # ---------------- 主流程 ----------------
-def main(argv):
-    if len(argv) < 2:
-        print("用法: python bottleneck_picker.py <研究底稿.json> "
-              "[--topic 主题] [--outdir 目录] [--export-watch 清单.txt]")
-        return 1
-    draft = load_draft(argv[1])
-    topic = None
-    outdir = DEFAULT_OUTDIR
-    export_watch = None
-    i = 2
-    while i < len(argv):
-        if argv[i] == "--topic" and i + 1 < len(argv):
-            topic = argv[i + 1]
-            i += 2
-        elif argv[i] == "--outdir" and i + 1 < len(argv):
-            outdir = argv[i + 1]
-            i += 2
-        elif argv[i] == "--export-watch" and i + 1 < len(argv):
-            export_watch = argv[i + 1]
-            i += 2
-        else:
-            i += 1
+def run_draft(draft_path, topic=None, outdir=None, export_watch=None):
+    """执行一份研究底稿，生成 HTML/MD/JSON 三件套；返回 (outdir, slug, results)"""
+    draft = load_draft(draft_path)
+    outdir = outdir or DEFAULT_OUTDIR
     topic = topic or draft.get("topic", "主题")
     os.makedirs(outdir, exist_ok=True)
     slug = _slug(topic)
@@ -589,6 +572,32 @@ def main(argv):
             f.write("\n".join(r["code"] for r in results) + "\n")
         print("已导出自选清单:", export_watch)
         print("提示：核对后再手动加入项目 自选股.txt（本脚本不直接修改它）。")
+    return outdir, slug, results
+
+
+def main(argv):
+    if len(argv) < 2:
+        print("用法: python bottleneck_picker.py <研究底稿.json> "
+              "[--topic 主题] [--outdir 目录] [--export-watch 清单.txt]")
+        return 1
+    draft_path = argv[1]
+    topic = None
+    outdir = None
+    export_watch = None
+    i = 2
+    while i < len(argv):
+        if argv[i] == "--topic" and i + 1 < len(argv):
+            topic = argv[i + 1]
+            i += 2
+        elif argv[i] == "--outdir" and i + 1 < len(argv):
+            outdir = argv[i + 1]
+            i += 2
+        elif argv[i] == "--export-watch" and i + 1 < len(argv):
+            export_watch = argv[i + 1]
+            i += 2
+        else:
+            i += 1
+    run_draft(draft_path, topic=topic, outdir=outdir, export_watch=export_watch)
     return 0
 
 

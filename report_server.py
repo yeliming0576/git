@@ -174,6 +174,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/bottleneck"):
             self._bottleneck()
             return
+        if self.path.startswith("/direction"):
+            self._direction()
+            return
         if self.path in ("/", "/index.html"):
             self._serve_report()
             return
@@ -362,6 +365,75 @@ ul{{line-height:1.9;}} a{{color:#2563eb;}}
         except Exception as e:
             print("[服务] 任性操作失败:", e)
             self._json({"ok": False, "msg": str(e)}, status=400)
+
+    def _direction(self):
+        """GET /direction[?name=AI算力] → 紫苏叶方向选股：有底稿出看板，无底稿出任务单"""
+        try:
+            if os.path.join(BASE, "紫苏叶选股") not in sys.path:
+                sys.path.insert(0, os.path.join(BASE, "紫苏叶选股"))
+            import direction_picker
+            q = self._query()
+            name = (q.get("name") or [""])[0].strip()
+            avail = direction_picker.available_directions()
+            if name:
+                r = direction_picker.run_direction(name)
+                if r["ok"]:
+                    self.send_response(302)
+                    self.send_header("Location", "/bottleneck")
+                    self.end_headers()
+                    return
+                with open(r["task_order"], encoding="utf-8") as f:
+                    task_text = f.read()
+                body = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>研究方向任务单：{_html_escape(name)}</title>
+<style>body{{background:#f5f6f8;color:#1f2937;font-family:"Microsoft YaHei",sans-serif;padding:28px;}}
+.wrap{{max-width:1000px;margin:0 auto;}} h1{{font-size:22px;}}
+.card{{background:#fff;border:1px solid #e6e9ef;border-radius:12px;padding:16px 20px;margin-bottom:16px;}}
+button{{background:#2563eb;color:#fff;border:none;border-radius:999px;padding:8px 18px;cursor:pointer;}}
+textarea{{width:100%;height:420px;border:1px solid #dbe2ea;border-radius:10px;padding:12px;font-size:12px;font-family:Consolas,monospace;box-sizing:border-box;}}
+a{{color:#2563eb;}}</style></head><body><div class="wrap">
+<h1>研究方向任务单：{_html_escape(name)}</h1>
+<div class="card"><b>该方向还没有研究底稿</b>，把下面内容复制给 Codex，附言"按 bottleneck-hunter skill 生成研究底稿"。
+完成后把底稿保存到 <b>紫苏叶选股\\研究方向\\{_html_escape(direction_picker._slug(name))}_研究底稿.json</b>，再回来输入方向即可出看板。</div>
+<div class="card"><button onclick="var t=document.getElementById('task');t.select();document.execCommand('copy');this.textContent='已复制 ✓';">复制任务单</button>
+<textarea id="task" readonly>{_html_escape(task_text)}</textarea></div>
+<div class="card"><a href="/direction">← 返回方向选股</a></div>
+</div></body></html>"""
+                data = body.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            items = "".join(
+                f"<li><a href='/direction?name={_html_escape(d)}'>{_html_escape(d)}</a></li>"
+                for d in avail) or "<li>（暂无，输入新方向生成任务单）</li>"
+            body = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>紫苏叶方向选股</title>
+<style>body{{background:#f5f6f8;color:#1f2937;font-family:"Microsoft YaHei",sans-serif;padding:28px;}}
+.wrap{{max-width:1000px;margin:0 auto;}} h1{{font-size:22px;}}
+.card{{background:#fff;border:1px solid #e6e9ef;border-radius:12px;padding:16px 20px;margin-bottom:16px;}}
+input{{flex:1;min-width:260px;padding:10px 14px;border:1px solid #cbd5e1;border-radius:10px;font-size:14px;}}
+button{{background:#2563eb;color:#fff;border:none;border-radius:999px;padding:10px 22px;font-size:14px;cursor:pointer;}}
+a{{color:#2563eb;}}</style></head><body><div class="wrap">
+<h1>紫苏叶方向选股</h1>
+<div class="card"><form method="get" action="/direction">
+<b>输入行业方向</b>（如 AI算力 / 白酒 / 固态电池）：
+<div style="display:flex;gap:10px;margin-top:10px;"><input name="name" placeholder="例如：AI算力"><button>开始选股</button></div>
+</form></div>
+<div class="card"><b>已有研究方向：</b><ul>{items}</ul>
+<div style="margin-top:6px;"><a href="/">← 返回主报告</a> ｜ <a href="/bottleneck">查看最近看板</a></div></div>
+</div></body></html>"""
+            data = body.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except Exception as e:
+            print("[服务] 方向选股失败:", e)
+            self._json({"ok": False, "msg": str(e)}, status=500)
 
     def _save(self):
         with LOCK:
