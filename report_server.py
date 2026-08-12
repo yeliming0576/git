@@ -169,6 +169,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/research"):
             self._research()
             return
+        if self.path.startswith("/bottleneck"):
+            self._bottleneck()
+            return
         if self.path in ("/", "/index.html"):
             self._serve_report()
             return
@@ -286,6 +289,38 @@ ul{{line-height:1.9;}} a{{color:#2563eb;}}
                 self.send_error(404, "Not Found")
                 return
             with open(path, "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception:
+            self.send_error(500, "Server Error")
+
+    def _bottleneck(self):
+        """GET /bottleneck[?file=xx.html] → 查看紫苏叶瓶颈机会看板（默认最新一份）"""
+        try:
+            from urllib.parse import unquote
+            d = os.path.join(BASE, "紫苏叶选股", "输出")
+            if not os.path.isdir(d):
+                self._json({"ok": False, "msg": "暂无紫苏叶看板（先运行 bottleneck_picker.py）"}, status=404)
+                return
+            files = sorted(f for f in os.listdir(d)
+                           if f.endswith(".html") and "瓶颈机会看板" in f)
+            if not files:
+                self._json({"ok": False, "msg": "暂无紫苏叶看板（先运行 bottleneck_picker.py）"}, status=404)
+                return
+            q = self._query()
+            fname = (q.get("file") or [""])[0].strip()
+            if fname:
+                fname = os.path.basename(unquote(fname))
+                if fname not in files:
+                    self.send_error(404, "Not Found")
+                    return
+            else:
+                fname = files[-1]
+            with open(os.path.join(d, fname), "rb") as f:
                 body = f.read()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")

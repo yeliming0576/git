@@ -74,8 +74,45 @@ def read_watchlist():
     return codes
 
 
+def _bottleneck_section():
+    """读取紫苏叶选股模块最近一次结果，生成总览页入口区块（无结果返回空）。"""
+    try:
+        out = os.path.join(BASE, "紫苏叶选股", "输出")
+        if not os.path.isdir(out):
+            return ""
+        jsons = [f for f in os.listdir(out)
+                 if f.endswith(".json") and "结果" in f]
+        if not jsons:
+            return ""
+        latest = max(jsons, key=lambda f: os.path.getmtime(os.path.join(out, f)))
+        with open(os.path.join(out, latest), encoding="utf-8") as f:
+            data = json.load(f)
+        results = data.get("results") or []
+        if not results:
+            return ""
+        rows = ""
+        for r in results:
+            rows += (f"<tr><td>{html.escape(r.get('code',''))}</td>"
+                     f"<td>{html.escape(r.get('name',''))}</td>"
+                     f"<td>{html.escape(r.get('rating',''))}级</td>"
+                     f"<td>{'★' * int(r.get('strength') or 0)}{'☆' * (5 - int(r.get('strength') or 0))}</td>"
+                     f"<td>{html.escape(r.get('verdict',''))}</td></tr>")
+        dash = latest.replace("结果", "瓶颈机会看板").replace(".json", ".html")
+        topic = html.escape(str(data.get("topic", "")))
+        return f"""
+  <h2>紫苏叶瓶颈选股（独立模块）</h2>
+  <div class="sub">bottleneck-hunter 研究底稿驱动的瓶颈选股看板，与原量化选股相互独立。最近结果：{topic}（{html.escape(str(data.get('generated_at','')))}）</div>
+  <div class="panel">
+    <table><tr><th>代码</th><th>名称</th><th>瓶颈评级</th><th>信号强度</th><th>结论</th></tr>{rows}</table>
+    <div class="sub" style="margin-top:8px;">完整看板：<a href="/bottleneck">网页查看</a>（服务模式）｜ 文件：紫苏叶选股\\输出\\{html.escape(dash)}</div>
+  </div>"""
+    except Exception as e:
+        print("[紫苏叶] 看板区块读取失败:", e)
+        return ""
+
+
 def build_report_html(analyses, title, note, gen_time, watch_codes=None, tracking=None,
-                      quick_html="", master_html="", thesis_html=""):
+                      quick_html="", master_html="", thesis_html="", bottleneck_html=""):
     """单HTML + 顶部按钮切换 + 每只股票全量详情"""
     watch_codes = watch_codes or []
     name_of = {}
@@ -130,6 +167,7 @@ def build_report_html(analyses, title, note, gen_time, watch_codes=None, trackin
 {quick_html}
 {master_html}
 {thesis_html}
+{bottleneck_html}
 </div>""")
     # 第1页: 近7日选股跟踪
     tabs.append('<button class="navbtn" data-slide="slide1">近7日跟踪</button>')
@@ -640,9 +678,12 @@ def main():
         _prog(75, "深度研究状态完成")
     except Exception as e:
         print("[研究] 论文状态读取失败:", e)
+    bottleneck_html = _bottleneck_section()
+    _prog(76, "紫苏叶看板入口完成")
     html = build_report_html(analyses, title, note, now, watch_codes=watch,
                              tracking=tracking_data, quick_html=quick_html,
-                             master_html=master_html, thesis_html=thesis_html)
+                             master_html=master_html, thesis_html=thesis_html,
+                             bottleneck_html=bottleneck_html)
     out = os.path.join(OUT_DIR, f"每日量化选股报告_{today}.html")
     ok_n = sum(1 for _c, _l, a, _a2 in analyses if a is not None)
     if ok_n == 0 and os.path.exists(out):
