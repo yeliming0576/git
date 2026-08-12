@@ -1,15 +1,14 @@
 @echo off
-chcp 65001 >nul
 call "%~dp0_python.cmd"
 if errorlevel 1 exit /b 1
 if "%~1"=="" (
-  set /p CODE=è¯·è¾“å…¥6ä½è‚¡ç¥¨ä»£ç ï¼ˆå¦‚ 600519ï¼‰:
+  set /p CODE=ÇëÊäÈë6Î»¹ÉÆ±´úÂë£¨Èç 600519£©:
 ) else (
   set "CODE=%~1"
 )
 "%PYEXE%" "%~dp0research_data.py" %CODE%
 echo.
-echo ä»»åŠ¡åŒ…å·²ç”Ÿæˆï¼šæŠ¥å‘Šå½’æ¡£\ç ”ç©¶\%CODE%\ç ”ç©¶ä»»åŠ¡åŒ…_%CODE%_*.md
-echo è¯·æŠŠä»»åŠ¡åŒ…å†…å®¹å‘ç»™ Codexï¼Œå¹¶é™„è¨€ï¼šæŒ‰ investment-team + investment-research æ‰§è¡Œæ·±åº¦ç ”ç©¶ã€‚
-echo æˆ–æ‰“å¼€ç½‘é¡µåè®¿é—®ï¼šhttp://127.0.0.1:8765/research?code=%CODE%
+echo ÈÎÎñ°üÒÑÉú³É£º±¨¸æ¹éµµ\ÑĞ¾¿\%CODE%\ÑĞ¾¿ÈÎÎñ°ü_%CODE%_*.md
+echo Çë°ÑÈÎÎñ°üÄÚÈİ·¢¸ø Codex£¬²¢¸½ÑÔ£º°´ investment-team + investment-research Ö´ĞĞÉî¶ÈÑĞ¾¿¡£
+echo »ò´ò¿ªÍøÒ³ºó·ÃÎÊ£ºhttp://127.0.0.1:8765/research?code=%CODE%
 pause

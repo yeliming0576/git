@@ -19,8 +19,10 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-# 共享开关：存在 局域网共享.flag 时允许非本机访问；关闭时逐请求拦截（即时生效）
-LAN_FLAG = os.path.join(BASE, "局域网共享.flag")
+# 共享开关：存在 LAN_SHARE.flag 时允许非本机访问；关闭时逐请求拦截（即时生效）
+# 兼容旧文件名 局域网共享.flag（早期版本创建）
+LAN_FLAG = os.path.join(BASE, "LAN_SHARE.flag")
+LEGACY_LAN_FLAG = os.path.join(BASE, "局域网共享.flag")
 HOST = "0.0.0.0"
 PORT = 8765
 INTERVAL = 300   # 自动刷新间隔（秒），默认 5 分钟
@@ -46,7 +48,7 @@ LOCAL_IPS = _local_ips()
 
 def sharing_allowed(client_ip):
     """共享开关实时判断：flag 存在=共享；否则仅本机 IP 可访问"""
-    if os.path.exists(LAN_FLAG):
+    if os.path.exists(LAN_FLAG) or os.path.exists(LEGACY_LAN_FLAG):
         return True
     return client_ip in LOCAL_IPS
 

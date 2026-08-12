@@ -1,10 +1,23 @@
 @echo off
-chcp 65001 >nul
-if exist "%~dp0å±€åŸŸç½‘å…±äº«.flag" (
-  echo å±€åŸŸç½‘å…±äº«å·²æ˜¯å¼€å¯çŠ¶æ€ã€‚
+if exist "%~dp0LAN_SHARE.flag" (
+  echo LAN_SHAREÒÑÊÇ¿ªÆô×´Ì¬¡£
 ) else (
-  type nul > "%~dp0å±€åŸŸç½‘å…±äº«.flag"
-  echo å·²å¼€å¯å±€åŸŸç½‘å…±äº«ã€‚
+  type nul > "%~dp0LAN_SHARE.flag"
+  echo ÒÑ¿ªÆôLAN_SHARE¡£
 )
-echo æç¤ºï¼šç«‹å³ç”Ÿæ•ˆï¼Œæ— éœ€é‡å¯æœåŠ¡ã€‚åŒäº‹çŽ°åœ¨å³å¯é€šè¿‡ http://æœ¬æœºIP:8765/ è®¿é—®ã€‚
+echo ÕýÔÚ¼ì²é·À»ðÇ½¹æÔò...
+netsh advfirewall firewall show rule name=StockPickerWeb8765 >nul 2>&1
+if not errorlevel 1 (
+  echo ·À»ðÇ½¹æÔòÒÑ´æÔÚ¡£
+) else (
+  echo ÐèÒªÌí¼Ó·À»ðÇ½·ÅÐÐ¹æÔò£¨8765¶Ë¿Ú£©£¬½«µ¯³ö¹ÜÀíÔ±ÊÚÈ¨´°¿Ú£¬Çëµã¡¾ÊÇ¡¿¡£
+  powershell -NoProfile -Command "Start-Process cmd -ArgumentList '/c','netsh advfirewall firewall add rule name=StockPickerWeb8765 dir=in action=allow protocol=TCP localport=8765' -Verb RunAs -Wait"
+  netsh advfirewall firewall show rule name=StockPickerWeb8765 >nul 2>&1
+  if not errorlevel 1 (
+    echo ·À»ðÇ½·ÅÐÐ³É¹¦¡£
+  ) else (
+    echo ·À»ðÇ½¹æÔòÌí¼ÓÊ§°Ü£ºÇëÓÒ¼ü±¾½Å±¾ÒÔ¹ÜÀíÔ±Éí·ÝÔËÐÐ£¬»òÊÖ¶¯·ÅÐÐ 8765 ¶Ë¿Ú¡£
+  )
+)
+echo ÌáÊ¾£º¹²ÏíÁ¢¼´ÉúÐ§£¬Í¬ÊÂÏÖÔÚ¼´¿ÉÍ¨¹ý http://±¾»úIP:8765/ ·ÃÎÊ¡£
 pause
