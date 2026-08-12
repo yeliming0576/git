@@ -370,6 +370,9 @@ def build_html(draft, results, bottlenecks, generated):
 <style>
 body{{background:#f5f6f8;color:#1f2937;font-family:"Microsoft YaHei",sans-serif;padding:28px;}}
 .wrap{{max-width:1180px;margin:0 auto;}}
+.topbar{{display:flex;gap:10px;align-items:center;margin-bottom:14px;}}
+.backbtn{{background:#fff;color:#2563eb;border:1px solid #bfdbfe;border-radius:999px;padding:8px 18px;text-decoration:none;font-size:14px;font-weight:600;}}
+.backbtn:hover{{background:#eff6ff;}}
 h1{{font-size:24px;}} h2{{font-size:18px;color:#2563eb;border-left:3px solid #2563eb;padding-left:8px;margin:26px 0 6px;}}
 h3{{font-size:16px;margin:0 0 8px;}}
 .sub{{color:#6b7280;font-size:13px;margin:6px 0 12px;line-height:1.7;}}
@@ -382,6 +385,10 @@ th{{background:#f1f5f9;}} td:first-child,th:first-child{{text-align:left;}}
 .warn{{background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:12px 16px;font-size:13px;color:#92400e;line-height:1.8;}}
 li{{font-size:13px;line-height:1.9;}}
 </style></head><body><div class="wrap">
+<div class="topbar">
+  <a class="backbtn" href="/">← 返回主报告</a>
+  <span class="sub">紫苏叶瓶颈机会看板（独立模块）</span>
+</div>
 <h1>紫苏叶瓶颈机会看板：{html.escape(draft.get('topic',''))}</h1>
 <div class="sub">生成时间 {generated} ｜ 底稿日期 {html.escape(str(draft.get('date','')))} ｜ 仅供产业链研究参考，不构成投资建议</div>
 
