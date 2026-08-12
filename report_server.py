@@ -409,6 +409,13 @@ a{{color:#2563eb;}}</style></head><body><div class="wrap">
             items = "".join(
                 f"<li><a href='/direction?name={_html_escape(d)}'>{_html_escape(d)}</a></li>"
                 for d in avail) or "<li>（暂无，输入新方向生成任务单）</li>"
+            rec = direction_picker.recommend_direction()
+            rec_hint = "（已有底稿，可直接出看板）" if rec["mode"] == "ready" \
+                else "（暂无底稿，将生成研究任务单）"
+            preset_links = "".join(
+                f"<a href='/direction?name={_html_escape(p['name'])}' "
+                f"style='display:inline-block;margin:0 10px 8px 0;'>{_html_escape(p['name'])}</a>"
+                for p in direction_picker.PRESET_DIRECTIONS)
             body = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
 <title>紫苏叶方向选股</title>
 <style>body{{background:#f5f6f8;color:#1f2937;font-family:"Microsoft YaHei",sans-serif;padding:28px;}}
@@ -421,7 +428,11 @@ a{{color:#2563eb;}}</style></head><body><div class="wrap">
 <div class="card"><form method="get" action="/direction">
 <b>输入行业方向</b>（如 AI算力 / 白酒 / 固态电池）：
 <div style="display:flex;gap:10px;margin-top:10px;"><input name="name" placeholder="例如：AI算力"><button>开始选股</button></div>
-</form></div>
+</form>
+<div style="margin-top:14px;"><a href="/direction?name={_html_escape(rec['name'])}"><button>⚡ 系统推荐：{_html_escape(rec['name'])}</button></a>
+<span class="sub">{_html_escape(rec['reason'])}{rec_hint}</span></div>
+</div>
+<div class="card"><b>推荐方向快捷入口：</b><div style="margin-top:10px;">{preset_links}</div></div>
 <div class="card"><b>已有研究方向：</b><ul>{items}</ul>
 <div style="margin-top:6px;"><a href="/">← 返回主报告</a> ｜ <a href="/bottleneck">查看最近看板</a></div></div>
 </div></body></html>"""

@@ -31,6 +31,27 @@ except Exception:
 DRAFT_DIR = os.path.join(BASE, "研究方向")
 TODO_DIR = os.path.join(DRAFT_DIR, "待研究")
 
+# 系统内置推荐方向（按当前市场关注度排序，可自行增删）
+PRESET_DIRECTIONS = [
+    {"name": "AI算力-光通信", "reason": "全球AI资本开支高增，光模块/光芯片为确定性瓶颈环节"},
+    {"name": "固态电池", "reason": "产业化临近，电解质、干法电极设备等环节卡脖子"},
+    {"name": "人形机器人", "reason": "丝杠、减速器、力传感器等核心部件国产化瓶颈"},
+    {"name": "创新药-GLP-1", "reason": "多肽原料药、注射笔供应链存在稀缺环节"},
+    {"name": "半导体材料", "reason": "先进封装材料、电子特气等国产替代空间大"},
+    {"name": "电力设备-电网", "reason": "AI用电与新能源并网推动特高压/配网投资上行"},
+    {"name": "白酒消费", "reason": "高端白酒品牌壁垒深厚，现金流质量高"},
+    {"name": "高股息-红利", "reason": "低利率环境下现金流稳定资产的防御方向"},
+]
+
+
+def recommend_direction():
+    """系统推荐方向：优先返回已有底稿的方向；否则返回首个内置推荐。"""
+    for p in PRESET_DIRECTIONS:
+        if find_draft(p["name"]):
+            return {"name": p["name"], "reason": p["reason"], "mode": "ready"}
+    p = PRESET_DIRECTIONS[0]
+    return {"name": p["name"], "reason": p["reason"], "mode": "task"}
+
 
 def _slug(direction):
     s = re.sub(r"[\\/:*?\"<>|\s]+", "_", direction.strip())
@@ -116,10 +137,14 @@ def main(argv):
         for d in available_directions():
             print(" -", d)
         return 0
-    if len(argv) < 2:
-        print(__doc__)
-        return 1
-    direction = argv[1]
+    if len(argv) < 2 or not argv[1].strip():
+        rec = recommend_direction()
+        direction = rec["name"]
+        mode_txt = "已有底稿，可直接出看板" if rec["mode"] == "ready" else "暂无底稿，将生成研究任务单"
+        print(f"⚡ 未输入方向，使用系统推荐：{direction}")
+        print(f"   推荐理由：{rec['reason']}（{mode_txt}）")
+    else:
+        direction = argv[1]
     outdir = None
     if len(argv) >= 4 and argv[2] == "--outdir":
         outdir = argv[3]
