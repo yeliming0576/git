@@ -76,17 +76,11 @@ def read_watchlist():
 
 def _bottleneck_section():
     """读取紫苏叶选股模块最近一次结果，生成总览页入口区块（无结果返回空）。"""
+    bn = _latest_bottleneck()
+    if not bn:
+        return ""
+    data, latest = bn
     try:
-        out = os.path.join(BASE, "紫苏叶选股", "输出")
-        if not os.path.isdir(out):
-            return ""
-        jsons = [f for f in os.listdir(out)
-                 if f.endswith(".json") and "结果" in f]
-        if not jsons:
-            return ""
-        latest = max(jsons, key=lambda f: os.path.getmtime(os.path.join(out, f)))
-        with open(os.path.join(out, latest), encoding="utf-8") as f:
-            data = json.load(f)
         results = data.get("results") or []
         if not results:
             return ""
@@ -111,8 +105,65 @@ def _bottleneck_section():
         return ""
 
 
+def _latest_bottleneck():
+    """返回 (最新结果JSON, 结果文件名)；无结果返回 None"""
+    try:
+        out = os.path.join(BASE, "紫苏叶选股", "输出")
+        if not os.path.isdir(out):
+            return None
+        jsons = [f for f in os.listdir(out) if f.endswith(".json") and "结果" in f]
+        if not jsons:
+            return None
+        latest = max(jsons, key=lambda f: os.path.getmtime(os.path.join(out, f)))
+        with open(os.path.join(out, latest), encoding="utf-8") as f:
+            return json.load(f), latest
+    except Exception:
+        return None
+
+
+def _logic_compare_html(picks):
+    """两种选股逻辑推荐对比：量化（今日热门） vs 紫苏叶（最近看板）"""
+    bn = _latest_bottleneck()
+    quant_rows = "".join(
+        f"<tr><td>{html.escape(p[0])}</td><td>{html.escape(p[1])}</td>"
+        f"<td>{p[2]:.2f}</td><td>{p[3]:+.2f}%</td></tr>"
+        for p in picks) or "<tr><td colspan='4'>今日无热门选股（市场偏弱或数据不足）</td></tr>"
+    bn_codes = set()
+    bn_rows = ""
+    if bn:
+        data = bn[0]
+        for r in data.get("results") or []:
+            bn_codes.add(r.get("code", ""))
+            bn_rows += (f"<tr><td>{html.escape(r.get('code',''))}</td>"
+                        f"<td>{html.escape(r.get('name',''))}</td>"
+                        f"<td>{html.escape(r.get('rating',''))}级</td>"
+                        f"<td>{'★' * int(r.get('strength') or 0)}{'☆' * (5 - int(r.get('strength') or 0))}</td>"
+                        f"<td>{html.escape(r.get('verdict',''))}</td></tr>")
+    else:
+        bn_rows = "<tr><td colspan='5'>暂无紫苏叶看板（先运行 bottleneck_picker.py）</td></tr>"
+    quant_codes = {p[0] for p in picks}
+    overlap = quant_codes & bn_codes
+    if overlap:
+        overlap_txt = "🔗 两种逻辑共振：" + "、".join(sorted(overlap)) + "（建议优先深度研究）"
+    else:
+        overlap_txt = "当前无重叠：两套逻辑完全独立，可分别研究"
+    return f"""
+  <h2>两种选股逻辑推荐对比</h2>
+  <div class="sub">左＝量化动量/热度逻辑（今日热门）；右＝紫苏叶瓶颈逻辑（最近看板）。</div>
+  <div class="flex">
+    <div class="half panel"><b>量化逻辑推荐</b>
+      <table><tr><th>代码</th><th>名称</th><th>现价</th><th>当日涨跌</th></tr>{quant_rows}</table>
+    </div>
+    <div class="half panel"><b>紫苏叶逻辑候选</b>
+      <table><tr><th>代码</th><th>名称</th><th>瓶颈评级</th><th>信号强度</th><th>结论</th></tr>{bn_rows}</table>
+    </div>
+  </div>
+  <div class="sub" style="font-weight:600;">{overlap_txt}</div>"""
+
+
 def build_report_html(analyses, title, note, gen_time, watch_codes=None, tracking=None,
-                      quick_html="", master_html="", thesis_html="", bottleneck_html=""):
+                      quick_html="", master_html="", thesis_html="", bottleneck_html="",
+                      compare_html=""):
     """单HTML + 顶部按钮切换 + 每只股票全量详情"""
     watch_codes = watch_codes or []
     name_of = {}
@@ -153,6 +204,7 @@ def build_report_html(analyses, title, note, gen_time, watch_codes=None, trackin
   <div class="panel">
     <table><tr><th>代码</th><th>名称</th><th>结论</th><th>现价</th><th>当日涨跌</th><th>近半年涨幅</th><th>回测总收益</th></tr>{overview_rows}</table>
   </div>
+{compare_html}
   <h2>自选股管理</h2>
   <div class="sub">输入任意A股代码，系统自动生成该股票的量化数据页（行情/成交量/指标/关键价位）；移除后对应页面消失。</div>
   <div class="panel">
@@ -680,10 +732,11 @@ def main():
         print("[研究] 论文状态读取失败:", e)
     bottleneck_html = _bottleneck_section()
     _prog(76, "紫苏叶看板入口完成")
+    compare_html = _logic_compare_html(picks)
     html = build_report_html(analyses, title, note, now, watch_codes=watch,
                              tracking=tracking_data, quick_html=quick_html,
                              master_html=master_html, thesis_html=thesis_html,
-                             bottleneck_html=bottleneck_html)
+                             bottleneck_html=bottleneck_html, compare_html=compare_html)
     out = os.path.join(OUT_DIR, f"每日量化选股报告_{today}.html")
     ok_n = sum(1 for _c, _l, a, _a2 in analyses if a is not None)
     if ok_n == 0 and os.path.exists(out):
