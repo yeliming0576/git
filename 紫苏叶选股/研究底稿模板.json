@@ -1,0 +1,56 @@
+{
+  "_说明": "本文件是 bottleneck-hunter 研究底稿的输入规范模板。由 Codex 按瓶颈猎手 skill 产出后，交给 bottleneck_picker.py 自动取数打分。所有带 _ 前缀的字段为说明，生成底稿时可删除。",
+  "topic": "AI算力-光通信（示例）",
+  "date": "2026-08-12",
+  "trend": {
+    "name": "AI基础设施建设",
+    "verified_events": [
+      "2026-XX-XX 事件1（来源：公司公告/行业报告）",
+      "2026-XX-XX 事件2（来源：...）"
+    ],
+    "capex_scale": "全球约 XXX 亿美元/年，增速 XX%",
+    "conclusion": "可追踪"
+  },
+  "bottlenecks": [
+    {
+      "_说明": "瓶颈环节：link=环节名，layer=供应链层级，rating=S/A/B（S=单点故障级）。criteria 为6条判定，供脚本复核评级；tam_yi=该环节可触达市场（亿元），用于估值红灯检查。",
+      "link": "InP衬底/EML激光器",
+      "layer": "Layer 2",
+      "rating": "S",
+      "criteria": {
+        "supply_concentration": 2,
+        "expansion_months": 24,
+        "substitutability": "低",
+        "utilization": 0.92,
+        "demand_growth": 0.5,
+        "validation_months": 12
+      },
+      "tam_yi": 500,
+      "candidates": [
+        {
+          "_说明": "candidate：code=6位A股代码，share_mkt=市场份额描述，revenue_ratio=瓶颈业务收入占比(0~1)，verified=交叉验证状态(客户/收入/产能/价格)，catalyst=催化剂，risks=风险清单，notes=备注。",
+          "code": "300000",
+          "name": "示例公司",
+          "share_mkt": "全球第二，市占率约20%",
+          "revenue_ratio": 0.6,
+          "verified": {
+            "customer": true,
+            "revenue": true,
+            "capacity": false,
+            "price": false
+          },
+          "catalyst": "1-3月：Q3财报；3-12月：新产能投产",
+          "risks": [
+            "下游需求不及预期",
+            "技术路线切换"
+          ],
+          "notes": "备注信息"
+        }
+      ]
+    }
+  ],
+  "rebuttals": [
+    "反证1：若XX技术路线切换，本环节需求可能归零",
+    "反证2：若头部客户自建产能，瓶颈逻辑被削弱"
+  ]
+}

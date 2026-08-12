@@ -1,0 +1,82 @@
+{
+  "topic": "AI算力-光通信（样例）",
+  "date": "2026-08-12",
+  "trend": {
+    "name": "AI基础设施建设",
+    "verified_events": [
+      "头部云厂商上调2026年AI资本开支指引（公开财报）",
+      "1.6T光模块进入头部客户批量采购周期（产业链调研）"
+    ],
+    "capex_scale": "全球AI资本开支约5000亿美元/年",
+    "conclusion": "可追踪"
+  },
+  "bottlenecks": [
+    {
+      "link": "高速光模块（1.6T/800G）",
+      "layer": "Layer 1/2",
+      "rating": "A",
+      "criteria": {
+        "supply_concentration": 3,
+        "expansion_months": 12,
+        "substitutability": "部分",
+        "utilization": 0.85,
+        "demand_growth": 0.6,
+        "validation_months": 9
+      },
+      "tam_yi": 3000,
+      "candidates": [
+        {
+          "code": "300308",
+          "name": "中际旭创",
+          "share_mkt": "全球光模块龙头，市占率约30%",
+          "revenue_ratio": 0.9,
+          "verified": {"customer": true, "revenue": true, "capacity": true, "price": false},
+          "catalyst": "Q3财报、1.6T放量节奏",
+          "risks": ["下游资本开支波动", "竞争加剧毛利率下滑"],
+          "notes": "典型瓶颈受益龙头"
+        },
+        {
+          "code": "300394",
+          "name": "天孚通信",
+          "share_mkt": "光器件平台型供应商",
+          "revenue_ratio": 0.7,
+          "verified": {"customer": true, "revenue": true, "capacity": false, "price": false},
+          "catalyst": "新客户导入、产能扩张",
+          "risks": ["客户集中", "新产品放量不及预期"],
+          "notes": ""
+        }
+      ]
+    },
+    {
+      "link": "InP衬底/EML激光器芯片",
+      "layer": "Layer 2/3",
+      "rating": "S",
+      "criteria": {
+        "supply_concentration": 2,
+        "expansion_months": 24,
+        "substitutability": "低",
+        "utilization": 0.92,
+        "demand_growth": 0.5,
+        "validation_months": 12
+      },
+      "tam_yi": 500,
+      "candidates": [
+        {
+          "code": "688498",
+          "name": "源杰科技",
+          "share_mkt": "国产EML激光器芯片领先者",
+          "revenue_ratio": 0.8,
+          "verified": {"customer": true, "revenue": false, "capacity": false, "price": false},
+          "catalyst": "高端EML客户认证进展",
+          "risks": ["研发进度不及预期", "竞争加剧"],
+          "notes": "含亏损高PS案例验证估值黄灯"
+        }
+      ]
+    }
+  ],
+  "rebuttals": [
+    "若硅光/CPO路线加速，传统可插拔光模块需求增速下移",
+    "若头部云厂商自研光模块或转向国内二供，龙头份额逻辑被削弱",
+    "EML若被薄膜铌酸锂/硅光集成替代，InP衬底环节需求承压"
+  ]
+}
