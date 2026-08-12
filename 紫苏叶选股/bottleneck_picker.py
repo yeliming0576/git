@@ -359,6 +359,9 @@ def build_html(draft, results, bottlenecks, generated):
     <p><b>安全边际粗算</b>：10年25xPE退出年化 ≈ {annual} ｜ 市值验算：{html.escape(((r['pack'] or {}).get('verify') or {}).get('note','—'))}</p>
     <p><b>交叉验证</b>：{html.escape(verified_txt)} ｜ {html.escape(cs_txt)}</p>
     <p><b>结论</b>：<b>{html.escape(r['verdict'])}</b> ｜ 信号强度 {_stars(r['strength'])}（{r['strength']}/5）</p>
+    <p><b>任性操作（模拟盘）</b>：<button class="arb" onclick="arb('{html.escape(r['code'])}')">任性买入</button>
+       <button class="arb2" onclick="arb('{html.escape(r['code'])}','SELL')">任性卖出</button>
+       <span class="sub">仅网页模式可用：输入股数（留空=按风险预算），确认后生成 T+1 模拟单并标记为任性单。</span></p>
   </div>"""
     rebuttals = "".join(f"<li>{html.escape(x)}</li>" for x in draft.get("rebuttals", [])) \
         or "<li>—</li>"
@@ -383,6 +386,10 @@ th{{background:#f1f5f9;}} td:first-child,th:first-child{{text-align:left;}}
 .card p{{font-size:13px;color:#374151;line-height:1.8;margin:6px 0;}}
 .tag{{display:inline-block;background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;border-radius:999px;padding:2px 10px;font-size:12px;}}
 .warn{{background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:12px 16px;font-size:13px;color:#92400e;line-height:1.8;}}
+.arb{{background:#fff;color:#dc2626;border:1px solid #fecaca;border-radius:999px;padding:4px 14px;font-size:13px;cursor:pointer;}}
+.arb:hover{{background:#fef2f2;}}
+.arb2{{background:#fff;color:#059669;border:1px solid #a7f3d0;border-radius:999px;padding:4px 14px;font-size:13px;cursor:pointer;}}
+.arb2:hover{{background:#ecfdf5;}}
 li{{font-size:13px;line-height:1.9;}}
 </style></head><body><div class="wrap">
 <div class="topbar">
@@ -418,7 +425,25 @@ li{{font-size:13px;line-height:1.9;}}
 
 <h2>七、AI 研究偏见声明与数据说明</h2>
 <div class="warn">瓶颈真实性（供给集中度/客户名单/扩产周期等）来自研究底稿，需用公告、认证、客户验证持续核验，禁止以 K 线或热度倒推瓶颈。财务与行情来自东财/腾讯免费接口（单源未双源核验），估值红灯为硬门槛。紫苏叶逻辑存在幸存者偏差与伪瓶颈风险，本看板不是买入建议。</div>
-</div></body></html>"""
+</div>
+<script>
+function arb(code, side) {{
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') {{
+    alert('请通过网页 http://127.0.0.1:8765/bottleneck 使用任性操作');
+    return;
+  }}
+  var act = side === 'SELL' ? '任性卖出' : '任性买入';
+  var s = prompt(act + '股数（留空=按风险预算自动建议）', '');
+  if (s !== null && !/^\\d*$/.test(s)) {{ alert('请输入整数股数'); return; }}
+  var url = '/manualbuy?code=' + code + (side ? '&side=' + side : '');
+  if (s) url += '&shares=' + s;
+  fetch(url, {{method: 'POST'}})
+    .then(function (r) {{ return r.json(); }})
+    .then(function (d) {{ alert(d.ok ? d.msg : '下单失败：' + d.msg); }})
+    .catch(function () {{ alert('下单失败：请确认网页服务在运行'); }});
+}}
+</script>
+</body></html>"""
 
 
 def build_md(draft, results, bottlenecks, generated):

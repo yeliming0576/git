@@ -183,6 +183,9 @@ class Handler(BaseHTTPRequestHandler):
         if not sharing_allowed(self.client_address[0]):
             self._deny_sharing()
             return
+        if self.path.startswith("/manualbuy"):
+            self._manual_buy()
+            return
         if self.path.startswith("/refresh"):
             self._refresh()
             return
@@ -331,6 +334,34 @@ ul{{line-height:1.9;}} a{{color:#2563eb;}}
             self.wfile.write(body)
         except Exception:
             self.send_error(500, "Server Error")
+
+    def _manual_buy(self):
+        """POST /manualbuy?code=600519&shares=100&side=BUY|SELL → 任性操作（模拟盘T+1）"""
+        try:
+            q = self._query()
+            code = (q.get("code") or [""])[0].strip()
+            if not (code.isdigit() and len(code) == 6):
+                self._json({"ok": False, "msg": "请输入6位股票代码"}, status=400)
+                return
+            shares = None
+            if q.get("shares") and q["shares"][0].strip().isdigit():
+                shares = int(q["shares"][0])
+            side = "SELL" if (q.get("side") or [""])[0].strip().upper() == "SELL" else "BUY"
+            import manual_trade
+            info = manual_trade.plan(code, shares=shares, side=side)
+            order = manual_trade.execute(info, reason="任性" + ("卖出" if side == "SELL" else "买入"))
+            act = "卖出" if side == "SELL" else "买入"
+            self._json({
+                "ok": True, "code": code, "name": info["name"], "side": side,
+                "shares": order.shares,
+                "entry": round(info["entry"], 2) if info["entry"] else None,
+                "stop": round(info["stop"], 2) if info["stop"] else None,
+                "msg": f"已生成 T+1 模拟{act}单：{code} {order.shares} 股"
+                       f"（{order.reason}，明日开盘执行）",
+            })
+        except Exception as e:
+            print("[服务] 任性操作失败:", e)
+            self._json({"ok": False, "msg": str(e)}, status=400)
 
     def _save(self):
         with LOCK:
