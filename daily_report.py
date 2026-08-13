@@ -610,15 +610,6 @@ setInterval(function () {{
   var left = Math.max(0, nextReload - Date.now());
   autoCountEl.textContent = String(Math.floor(left / 60000)).padStart(2, '0') + ':' + String(Math.floor(left % 60000 / 1000)).padStart(2, '0');
   if (left > 0) return;
-  var nowD = new Date();
-  var wd = nowD.getDay();
-  var hm = ('0' + nowD.getHours()).slice(-2) + ':' + ('0' + nowD.getMinutes()).slice(-2);
-  var inSession = wd >= 1 && wd <= 5 && ((hm >= '09:15' && hm <= '11:35') || (hm >= '12:55' && hm <= '15:10'));
-  if (!inSession) {{
-    autoHintEl.textContent = '（已收盘，自动刷新暂停，下一交易日 09:15 起恢复）';
-    nextReload = Date.now() + AUTO_INTERVAL;
-    return;
-  }}
   if (!autoRefresh) {{ nextReload = Date.now() + AUTO_INTERVAL; return; }}
   if (editing) {{
     autoHintEl.textContent = '（编辑中，自动刷新顺延5分钟；点【锁定】后恢复）';

@@ -74,28 +74,10 @@ def parse_port():
 
 
 def schedule_auto_refresh(interval):
-    """后台线程：每 interval 秒自动重新抓取行情并生成最新报告"""
-    last_state = None
-
-    def market_open():
-        """A股交易时段（含收盘缓冲）：工作日 9:15~11:35 或 12:55~15:10"""
-        now = datetime.datetime.now()
-        if now.weekday() >= 5:
-            return False
-        t = now.strftime("%H:%M")
-        return ("09:15" <= t <= "11:35") or ("12:55" <= t <= "15:10")
-
+    """后台线程：每 interval 秒自动重新抓取行情并生成最新报告（不区分交易时段）"""
     def worker():
-        nonlocal last_state
         while True:
             time.sleep(interval)
-            open_now = market_open()
-            if open_now != last_state:
-                print("[服务] 已进入交易时段，自动刷新开启" if open_now
-                      else "[服务] 已收盘/休市，自动刷新暂停（下一交易日 09:15 恢复）")
-                last_state = open_now
-            if not open_now:
-                continue
             try:
                 with LOCK:
                     import daily_report
