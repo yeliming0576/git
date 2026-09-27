@@ -5,8 +5,8 @@
 """
 import datetime
 
-import db
-import quant_engine as Q
+from stockapp import db
+from stockapp import quant_engine as Q
 
 
 def _load_rows(code):

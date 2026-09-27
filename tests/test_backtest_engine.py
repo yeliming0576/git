@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """回测撮合口径：T+1 开盘执行、双边成本、一字涨跌停不可成交（离线）"""
-import v2
+from stockapp import v2
 from conftest import base_features, make_entry_worthy
 
 

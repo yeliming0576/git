@@ -2,7 +2,7 @@
 """v2 指标与特征：离线数值校验"""
 import pytest
 
-import v2
+from stockapp import v2
 
 
 def test_sma_basic():

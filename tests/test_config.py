@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-import config
+from stockapp import config
 
 
 @pytest.fixture
@@ -73,11 +73,11 @@ def test_broken_json_falls_back_to_defaults(tmp_path, restore_config):
 
 
 def test_downstream_modules_are_wired_to_config():
-    import backtest_engine as E
-    import datafeed
-    import quant_engine as Q
-    import selection
-    import v2
+    from stockapp import backtest_engine as E
+    from stockapp import datafeed
+    from stockapp import quant_engine as Q
+    from stockapp import selection
+    from stockapp import v2
 
     assert selection.PRICE_FLOOR == config.PRICE_FLOOR
     assert selection.LOWVAL_LIMIT == config.LOWVAL_LIMIT

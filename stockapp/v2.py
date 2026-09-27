@@ -19,9 +19,9 @@ import math
 import random
 import statistics
 
-import history
-import backtest_engine
-import config as C
+from stockapp import history
+from stockapp import backtest_engine
+from stockapp import config as C
 
 # 回测口径统一到 backtest_engine（下列常量保留为别名，外部引用不受影响）
 COST_PER_SIDE = backtest_engine.COST_PER_SIDE
@@ -295,7 +295,7 @@ def analyze_v2(code, name="", equity=EQUITY_DEFAULT):
     last_i = len(rows) - 1
     cs = None
     try:
-        import market_snapshot
+        from stockapp import market_snapshot
         cs = market_snapshot.cross_sectional(code)
     except Exception:
         cs = None

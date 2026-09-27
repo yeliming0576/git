@@ -22,8 +22,8 @@ import math
 import random
 import statistics
 
-import config as C
-import log_utils
+from stockapp import config as C
+from stockapp import log_utils
 
 COST_PER_SIDE = C.COST_PER_SIDE       # 单边成本（往返 0.30%）
 RF_ANNUAL = C.RF_ANNUAL               # 无风险利率

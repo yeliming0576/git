@@ -100,7 +100,7 @@ def auto_draft_for(direction):
     toks = [t for t in _tokens(direction) if len(t) >= 2]
     rows = []
     try:
-        import market_snapshot
+        from stockapp import market_snapshot
         snap = market_snapshot.get_snapshot()
         rows = (snap or {}).get("rows") or []
     except Exception:

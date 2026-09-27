@@ -7,7 +7,7 @@ import urllib.request
 
 import pytest
 
-import report_server
+from stockapp import report_server
 
 
 @pytest.fixture

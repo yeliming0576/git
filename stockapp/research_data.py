@@ -25,8 +25,8 @@ import re
 import sys
 from decimal import Decimal, ROUND_HALF_EVEN
 
-import db
-import datafeed
+from stockapp import db
+from stockapp import datafeed
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -36,7 +36,7 @@ except Exception:
 
 db.init_db()
 
-BASE = os.path.dirname(os.path.abspath(__file__))
+from stockapp.app_paths import BASE
 RESEARCH_DIR = os.path.join(BASE, "报告归档", "研究")
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 TIMEOUT = 15
@@ -401,8 +401,8 @@ def build_quick_review_html(packs):
 def _quant_summary(code):
     """复用项目已有量化分析：趋势状态 / L3 评分 / 回测总收益（失败返回错误信息）"""
     try:
-        import quant_engine as Q
-        import v2
+        from stockapp import quant_engine as Q
+        from stockapp import v2
         a = Q.analyze(code)
         a2 = None
         try:
@@ -435,7 +435,7 @@ def build_task_pack(pack, quant=None):
         quant = _quant_summary(code)
     master = None
     try:
-        import master_score
+        from stockapp import master_score
         master = master_score.master_scores(
             pack, quant=quant if isinstance(quant, dict) and "error" not in quant else None)
     except Exception:

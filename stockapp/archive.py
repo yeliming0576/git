@@ -10,7 +10,7 @@ import zipfile
 
 ARCHIVE_DIR_NAME = "报告归档"
 DEFAULT_KEEP_DAYS = 30
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+from stockapp.app_paths import BASE as PROJECT_ROOT
 DEFAULT_ARCHIVE_DIR = os.path.join(PROJECT_ROOT, ARCHIVE_DIR_NAME)
 PATTERNS = [
     r"每日量化选股报告_(\d{8})\.html",

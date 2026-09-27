@@ -6,7 +6,7 @@
   - 文件：`日志/运行日志_YYYYMMDD.log`，自动保留最近 30 天
 
 用法：
-    import log_utils
+    from stockapp import log_utils
     log = log_utils.get_logger("datafeed")
     log.warning("腾讯行情失败，切换 akshare 兜底", exc_info=True)
 
@@ -18,7 +18,7 @@ import os
 import sys
 import time
 
-from app_paths import BASE
+from stockapp.app_paths import BASE
 
 LOG_DIR = os.path.join(BASE, "日志")
 KEEP_DAYS = 30

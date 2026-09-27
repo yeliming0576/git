@@ -2,9 +2,9 @@
 """公共回测引擎：接口结构与统一口径（离线）"""
 import pytest
 
-import backtest_engine as E
-import quant_engine as Q
-import v2
+from stockapp import backtest_engine as E
+from stockapp import quant_engine as Q
+from stockapp import v2
 from conftest import base_features
 
 

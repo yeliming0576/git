@@ -120,12 +120,12 @@ def count_reds(criteria):
 def fetch_pack(code):
     """返回 (pack, cs)；失败返回 (None, None)，不抛错"""
     try:
-        import research_data
+        from stockapp import research_data
         pack = research_data.get_pack(code)
     except Exception:
         pack = None
     try:
-        import market_snapshot
+        from stockapp import market_snapshot
         cs = market_snapshot.cross_sectional(code)
     except Exception:
         cs = None

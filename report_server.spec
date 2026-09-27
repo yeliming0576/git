@@ -24,7 +24,7 @@ import pathlib
 
 
 def _project_stdlib_imports():
-    roots = [".", "cnfinancialscraper", "紫苏叶选股"]
+    roots = [".", "stockapp", "cnfinancialscraper", "紫苏叶选股"]
     stdlib = set(getattr(sys, "stdlib_module_names", set()))
     skip = {"tkinter", "turtle", "test", "unittest", "doctest", "pydoc",
             "idlelib", "lib2to3", "ensurepip", "venv", "distutils",
@@ -57,6 +57,8 @@ EXCLUDES = [
     "PySide6", "PyQt5", "PyQt6", "IPython", "pytest", "notebook",
     "selenium", "httpx", "aiohttp", "jinja2", "flask", "tornado",
     "torch", "tensorflow", "cv2", "skimage",
+    # 可选兜底数据源：不打进 EXE，避免体积暴涨
+    "akshare", "efinance",
 ]
 
 a = Analysis(

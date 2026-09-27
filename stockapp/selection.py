@@ -10,7 +10,7 @@
 6. 行业分散：最终入选至少分属两个行业（新浪行业），并给出拥挤度预警
 
 常用入口：
-    import selection
+    from stockapp import selection
     result = selection.pick_hot_stocks(3)
     result["picks"]  -> [{"code","name","price","change_pct","amount",
                           "turnover","pe","total_mv","score"}, ...]
@@ -27,13 +27,13 @@ import re
 import statistics
 import time
 
-import eastmoney
-import quant_engine as Q
-import db
-import datafeed
-import config as C
+from stockapp import eastmoney
+from stockapp import quant_engine as Q
+from stockapp import db
+from stockapp import datafeed
+from stockapp import config as C
 
-BASE = os.path.dirname(os.path.abspath(__file__))
+from stockapp.app_paths import BASE
 DATA_DIR = os.path.join(BASE, "数据")
 HISTORY_FILE = os.path.join(DATA_DIR, "排名历史.json")
 CACHE_FILE = os.path.join(DATA_DIR, "热门股缓存.json")
@@ -364,7 +364,7 @@ def _market_regime():
         index_ok, note = None, f"指数数据暂不可用（{e}）"
     breadth_ok = None
     try:
-        import market_snapshot
+        from stockapp import market_snapshot
         b = market_snapshot.breadth()
         if b and b.get("advancers_ratio") is not None:
             breadth_ok = b["advancers_ratio"] >= 0.5
@@ -518,7 +518,7 @@ def build_universe(max_n=60, extra_codes=None):
     """L0 股票池：优先全市场截面（成交额+换手 top N，P1 扩大池），
     失败时回退三榜前 max_n + 自选/持仓/固定关注。"""
     try:
-        import market_snapshot
+        from stockapp import market_snapshot
         codes = market_snapshot.top_universe(max_n, extra_codes)
         if codes:
             return codes
@@ -888,7 +888,7 @@ def _lv_market_rows(force=False):
         out = []
     if not out:
         try:
-            import market_snapshot
+            from stockapp import market_snapshot
             rows = ((market_snapshot.get_snapshot() or {}).get("rows")) or []
         except Exception:
             rows = []
@@ -1224,7 +1224,7 @@ def lowval_fallback_pack(pick, force=False):
     fins = lowval_fetch_quarterly(code, force=force)
     high52 = low52 = None
     try:
-        import research_data
+        from stockapp import research_data
         high52, low52 = research_data.fetch_52w(code)
     except Exception:
         pass
@@ -1250,7 +1250,7 @@ def lowval_fundamental(picks, force=False):
     if not picks:
         return out
     try:
-        import research_data
+        from stockapp import research_data
     except Exception:
         return out
     import concurrent.futures as _cf
@@ -1289,7 +1289,7 @@ def lowval_fundamental(picks, force=False):
     except Exception:
         pass
     try:
-        import master_score
+        from stockapp import master_score
         out["master_html"] = master_score.build_master_review_html(packs)
     except Exception:
         pass

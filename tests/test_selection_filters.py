@@ -2,7 +2,7 @@
 """selection.py 过滤与低值复苏打分（离线）"""
 import pytest
 
-import selection
+from stockapp import selection
 
 
 def _row(code, name="测试股", price=10.0, pe=20.0, turnover=5.0, amount=1e8, **kw):

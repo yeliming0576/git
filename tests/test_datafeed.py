@@ -2,7 +2,7 @@
 """统一数据层：降级链、重试退避、限流（全部离线）"""
 import pytest
 
-import datafeed
+from stockapp import datafeed
 
 
 def test_fallback_prefers_primary_and_tags_source():

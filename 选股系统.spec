@@ -27,7 +27,7 @@ def _project_stdlib_imports():
     用于 hiddenimports：项目自身模块改为从磁盘加载（不冻结进 PYZ）后，
     这些 stdlib 不会再被自动带入冻结环境，必须显式列出，否则运行时会
     ModuleNotFoundError（如 webbrowser）。"""
-    roots = [".", "紫苏叶选股", "tools", "cnfinancialscraper"]
+    roots = [".", "stockapp", "紫苏叶选股", "tools", "cnfinancialscraper"]
     stdlib = set(getattr(sys, "stdlib_module_names", set()))
     skip = {"tkinter", "turtle", "test", "unittest", "doctest", "pydoc",
             "idlelib", "lib2to3", "ensurepip", "venv", "distutils",
@@ -60,6 +60,9 @@ def _collect():
             if os.path.basename(path) == "选股系统.spec":
                 continue
             datas.append((path, "."))
+    # 核心包（stockapp/*.py）
+    for path in glob.glob(os.path.join(ROOT, "stockapp", "*.py")):
+        datas.append((path, "stockapp"))
     # 紫苏叶选股（子模块 + 底稿库/模板/样例）
     for pat in ("*.py", "*.json", "*.md"):
         for path in glob.glob(os.path.join(ROOT, "紫苏叶选股", pat)):
@@ -95,8 +98,11 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
+    # akshare/efinance 是可选兜底数据源（装上体积会涨到数百 MB），
+    # EXE 版本只用主源；需要兜底请用源码方式运行。
     excludes=["tkinter", "matplotlib", "numpy", "pandas", "PyQt5", "PySide6",
-              "IPython", "notebook", "pytest", "setuptools", "pip"],
+              "IPython", "notebook", "pytest", "setuptools", "pip",
+              "akshare", "efinance", "lxml", "bs4", "openpyxl"],
     noarchive=False,
     optimize=0,
 )

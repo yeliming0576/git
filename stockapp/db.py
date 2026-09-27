@@ -17,7 +17,7 @@ import json
 import os
 import sqlite3
 
-BASE = os.path.dirname(os.path.abspath(__file__))
+from stockapp.app_paths import BASE
 DATA_DIR = os.path.join(BASE, "数据")
 os.makedirs(DATA_DIR, exist_ok=True)
 DB_PATH = os.path.join(DATA_DIR, "选股数据.db")

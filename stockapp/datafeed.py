@@ -22,8 +22,8 @@ from urllib.parse import urlsplit
 
 import requests
 
-import config as C
-import log_utils
+from stockapp import config as C
+from stockapp import log_utils
 
 log = log_utils.get_logger("datafeed")
 

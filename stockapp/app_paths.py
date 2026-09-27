@@ -12,12 +12,12 @@ PyInstaller onefile 模式下 __file__ 指向 %TEMP%\\_MEIxxxxx（随机目录�
 
 用法：把原来的
       try:
-          from app_paths import BASE
+          from stockapp.app_paths import BASE
       except ImportError:  # 兼容单独运行本文件的场景
           BASE = os.path.dirname(os.path.abspath(__file__))
   换成
       try:
-          from app_paths import BASE
+          from stockapp.app_paths import BASE
       except ImportError:
           BASE = os.path.dirname(os.path.abspath(__file__))
 """
@@ -29,7 +29,8 @@ def _resolve():
     # frozen：PyInstaller 打包后，数据与配置必须落在 EXE 旁边（可写、路径固定）
     if getattr(sys, "frozen", False):
         return os.path.dirname(os.path.abspath(sys.executable))
-    return os.path.dirname(os.path.abspath(__file__))
+    # 源码运行：本文件在 stockapp 包里，项目根 = 包的上一级目录
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 BASE = _resolve()

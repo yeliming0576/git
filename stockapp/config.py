@@ -4,7 +4,7 @@
 优先级：**config.json > config.py 默认值**（不使用环境变量）
 
 用法：
-    import config
+    from stockapp import config
     config.PRICE_FLOOR          # 默认 2.0
 
 想改参数又不想动代码（EXE 用户）：
@@ -17,8 +17,8 @@
 import json
 import os
 
-from app_paths import BASE
-import log_utils
+from stockapp.app_paths import BASE
+from stockapp import log_utils
 
 log = log_utils.get_logger("config")
 

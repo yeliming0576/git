@@ -18,8 +18,8 @@ import re
 import statistics
 import time
 
-import db
-import datafeed
+from stockapp import db
+from stockapp import datafeed
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 TIMEOUT = 20

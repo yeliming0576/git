@@ -9,10 +9,10 @@ import re
 import time
 import datetime
 
-import v2  # noqa: E402  v2 规范分析模块
-import backtest_engine
-import datafeed
-import config as C
+from stockapp import v2  # noqa: E402  v2 规范分析模块
+from stockapp import backtest_engine
+from stockapp import datafeed
+from stockapp import config as C
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126",

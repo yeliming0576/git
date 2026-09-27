@@ -10,13 +10,13 @@ import json
 import os
 import sqlite3
 
-import datafeed
+from stockapp import datafeed
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36",
     "Referer": "https://gu.qq.com/",
 }
 
-BASE = os.path.dirname(os.path.abspath(__file__))
+from stockapp.app_paths import BASE
 DATA_DIR = os.path.join(BASE, "数据")
 os.makedirs(DATA_DIR, exist_ok=True)
 DB_PATH = os.path.join(DATA_DIR, "选股数据.db")
