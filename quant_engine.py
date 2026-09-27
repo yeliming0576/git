@@ -9,9 +9,9 @@ import re
 import time
 import datetime
 
-import requests
 import v2  # noqa: E402  v2 规范分析模块
 import backtest_engine
+import datafeed
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126",
@@ -36,11 +36,11 @@ def _tencent_symbol(code):
     return _sina_symbol(code)
 
 
-def fetch_quote(code):
-    """腾讯实时行情: 名称/现价/涨跌/量比/换手/PE/市值"""
+def _tencent_quote(code):
+    """腾讯实时行情（HTTP 统一走 datafeed 的重试/退避/限流）"""
     sym = _tencent_symbol(code)
-    r = requests.get(f"https://qt.gtimg.cn/q={sym}", headers=HEADERS, timeout=20)
-    r.encoding = "gbk"
+    r = datafeed.http_get(f"https://qt.gtimg.cn/q={sym}", headers=HEADERS,
+                          timeout=20, encoding="gbk")
     f = r.text.strip().split("~")
     if len(f) < 46:
         raise RuntimeError(f"行情解析失败: {code}")
@@ -55,33 +55,51 @@ def fetch_quote(code):
     }
 
 
-def fetch_kline(code, datalen=260):
-    """新浪日K线(前复权), volume单位=股; 带重试"""
+def _normalize_quote(q):
+    """把 datafeed 统一结构补齐为 quant_engine 的历史字段名（降级时用）"""
+    out = dict(q)
+    out.setdefault("amount_wan", (out.get("amount_yi") or 0) * 1e4)
+    if out.get("turnover_pct") is None:
+        out["turnover_pct"] = out.get("turnover_rate")
+    if out.get("circ_mv_yi") is None:
+        out["circ_mv_yi"] = out.get("float_cap_yi")
+    if out.get("date_time") is None:
+        out["date_time"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return out
+
+
+def fetch_quote(code):
+    """腾讯实时行情: 名称/现价/涨跌/量比/换手/PE/市值（失败自动降级 akshare/efinance）"""
+    q, _src = datafeed.quote(code, native=lambda: _tencent_quote(code))
+    return _normalize_quote(q)
+
+
+def _sina_kline(code, datalen):
+    """新浪日K线(前复权), volume单位=股"""
     sym = _sina_symbol(code)
     url = ("https://quotes.sina.cn/cn/api/jsonp_v2.php/var%20_/"
            "CN_MarketDataService.getKLineData"
            f"?symbol={sym}&scale=240&ma=no&datalen={datalen}")
-    last_err = None
-    for _ in range(3):
-        try:
-            r = requests.get(url, headers=HEADERS, timeout=20)
-            r.raise_for_status()
-            m = re.search(r"\((\[.*\])\)\s*;?\s*$", r.text, re.S)
-            if not m:
-                raise RuntimeError("K线格式异常")
-            rows = json.loads(m.group(1))
-            if not rows:
-                raise RuntimeError("K线为空")
-            return [{
-                "date": x["day"],
-                "open": float(x["open"]), "high": float(x["high"]),
-                "low": float(x["low"]), "close": float(x["close"]),
-                "volume": float(x["volume"]),
-            } for x in rows]
-        except Exception as e:
-            last_err = e
-            time.sleep(2.5)
-    raise RuntimeError(f"K线抓取失败: {last_err}")
+    r = datafeed.http_get(url, headers=HEADERS, timeout=20)
+    m = re.search(r"\((\[.*\])\)\s*;?\s*$", r.text, re.S)
+    if not m:
+        raise RuntimeError("K线格式异常")
+    rows = json.loads(m.group(1))
+    if not rows:
+        raise RuntimeError("K线为空")
+    return [{
+        "date": x["day"],
+        "open": float(x["open"]), "high": float(x["high"]),
+        "low": float(x["low"]), "close": float(x["close"]),
+        "volume": float(x["volume"]),
+    } for x in rows]
+
+
+def fetch_kline(code, datalen=260):
+    """新浪日K线(前复权), volume单位=股（失败自动降级 akshare/efinance）"""
+    rows, _src = datafeed.kline(code, days=datalen, adjust="qfq",
+                                native=lambda: _sina_kline(code, datalen))
+    return rows
 
 
 # ---------------- 指标 ----------------
@@ -231,7 +249,9 @@ def analyze(code):
     atrs = atr(rows)
     vol_ma5 = sma([r["volume"] for r in rows], 5)
 
-    float_shares = quote["circ_mv_yi"] * 1e8 / quote["price"]
+    # 降级数据源可能拿不到流通市值，此时换手率置空而不是报错
+    _circ_mv = quote.get("circ_mv_yi") or quote.get("total_mv_yi") or 0
+    float_shares = _circ_mv * 1e8 / quote["price"] if quote.get("price") else 0.0
     for i, r in enumerate(rows):
         r["ma5"], r["ma10"], r["ma20"], r["ma60"] = ma5[i], ma10[i], ma20[i], ma60[i]
         r["dif"], r["dea"], r["hist"] = dif[i], dea[i], hist[i]
@@ -239,7 +259,7 @@ def analyze(code):
         r["atr"], r["vol_ma5"] = atrs[i], vol_ma5[i]
         r["bup"], r["bmid"], r["blo"] = bup[i], bmid[i], blo[i]
         r["vol_ratio"] = round(r["volume"] / vol_ma5[i], 2) if vol_ma5[i] else None
-        r["turnover"] = r["volume"] / float_shares * 100
+        r["turnover"] = r["volume"] / float_shares * 100 if float_shares > 0 else None
         r["amount_yi"] = r["volume"] * (r["open"] + r["high"] + r["low"] + r["close"]) / 4 / 1e8
     for i, r in enumerate(rows):
         prev = rows[i - 1]["close"] if i else r["open"]
@@ -341,8 +361,10 @@ def analyze(code):
     vol_list = [r["volume"] for r in win]
     up_days = sum(1 for r in win if r["vol_ratio"] and r["vol_ratio"] >= 1.5)
     dn_days = sum(1 for r in win if r["vol_ratio"] and r["vol_ratio"] <= 0.6)
-    float_shares = quote["circ_mv_yi"] * 1e8 / quote["price"]
-    avg_turn = sum(r["volume"] / float_shares * 100 for r in win) / len(win)
+    if float_shares > 0:
+        avg_turn = sum(r["volume"] / float_shares * 100 for r in win) / len(win)
+    else:
+        avg_turn = 0.0      # 流通市值也拿不到时按 0 展示，避免报告渲染报错
 
     # 月度/放量明细/成交额榜
     monthly = {}

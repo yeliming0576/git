@@ -10,8 +10,7 @@ import os
 import re
 import time
 
-import requests
-
+import datafeed
 SINA_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36",
     "Referer": "https://finance.sina.com.cn",
@@ -49,14 +48,30 @@ def _num(v, allow_none=False):
 
 
 def get_hot_stocks(rank_type="volume", limit=100):
-    """获取热门榜（新浪优先，东方财富兜底），rank_type: volume/amount/turnover"""
+    """获取热门榜（新浪 → 东方财富 → akshare），rank_type: volume/amount/turnover"""
     last_err = None
-    for fn in (_sina_hot_stocks, _eastmoney_hot_stocks):
+    for fn in (_sina_hot_stocks, _eastmoney_hot_stocks, _akshare_hot_stocks):
         try:
             return fn(rank_type, limit)
         except Exception as e:
             last_err = e
     raise RuntimeError(f"热门榜单抓取失败: {last_err}")
+
+
+def _akshare_hot_stocks(rank_type="volume", limit=100):
+    """akshare 快照兜底 → 与本模块既有返回结构一致"""
+    rows = datafeed.ak_rank(rank_type, limit)
+    out = []
+    for r in rows:
+        out.append({
+            "code": r["code"], "name": r["name"], "price": r["price"],
+            "change_pct": r["change_pct"],
+            "amount": r["amount_yuan"] / 1e8,
+            "turnover": r["turnover"], "pe": r["pe"],
+            "total_mv": r["mktcap_yuan"] / 1e8,
+            "vol_ratio": None,
+        })
+    return out
 
 
 def save_picks_cache(path, picks):
@@ -89,8 +104,8 @@ def _sina_hot_stocks(rank_type="volume", limit=100):
            "api/json_v2.php/Market_Center.getHQNodeData")
     params = {"page": 1, "num": min(int(limit), 100),
               "sort": sort, "asc": 0, "node": "hs_a"}
-    r = requests.get(url, params=params, headers=SINA_HEADERS, timeout=12)
-    r.raise_for_status()
+    r = datafeed.http_get(url, params=params, headers=SINA_HEADERS, timeout=12,
+                          retries=2)
     # 新浪返回的是未加引号的键，先补引号再解析
     fixed = re.sub(r"([{,])(\w+):", r'\1"\2":', r.text.strip())
     items = json.loads(fixed) or []
@@ -130,10 +145,10 @@ def _eastmoney_hot_stocks(rank_type="volume", limit=100):
     last_err = None
     for base in API_BASES:
         try:
-            r = requests.get(base + "/clist/get", params=params,
-                             headers=EM_HEADERS, timeout=8)
-            r.raise_for_status()
-            data = (r.json() or {}).get("data") or {}
+            raw = datafeed.get_json(base + "/clist/get", params=params,
+                                    headers=EM_HEADERS, timeout=8,
+                                    retries=1, min_interval=0.1)
+            data = (raw or {}).get("data") or {}
             diff = data.get("diff") or []
             rows = []
             for d in diff:

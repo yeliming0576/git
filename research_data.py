@@ -25,9 +25,8 @@ import re
 import sys
 from decimal import Decimal, ROUND_HALF_EVEN
 
-import requests
-
 import db
+import datafeed
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -94,11 +93,11 @@ def _fmt_pct(v):
 
 
 # ---------------- 数据抓取 ----------------
-def fetch_quote(code):
-    """腾讯实时行情：现价/名称/总市值(亿)/流通市值(亿)/PE/PB/换手/成交额/涨跌幅"""
+def _tencent_quote(code):
+    """腾讯实时行情（HTTP 统一走 datafeed 的重试/退避/限流）"""
     market, prefix = _market_prefix(code)
-    raw = requests.get(f"https://qt.gtimg.cn/q={prefix}{code}", headers=HEADERS,
-                       timeout=TIMEOUT).content
+    raw = datafeed.http_get(f"https://qt.gtimg.cn/q={prefix}{code}", headers=HEADERS,
+                            timeout=TIMEOUT).content
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
@@ -133,6 +132,23 @@ def fetch_quote(code):
     }
 
 
+def _normalize_quote(q):
+    """把 datafeed 统一结构补齐为 research_data 的历史字段名（降级时用）"""
+    out = dict(q)
+    out.setdefault("float_cap_yi", out.get("circ_mv_yi"))
+    out.setdefault("market_cap_yi", out.get("total_mv_yi"))
+    if out.get("turnover_rate") is None:
+        out["turnover_rate"] = out.get("turnover_pct")
+    return out
+
+
+def fetch_quote(code):
+    """腾讯实时行情：现价/名称/总市值(亿)/流通市值(亿)/PE/PB/换手/成交额/涨跌幅
+    （腾讯不可用时自动降级 akshare / efinance）"""
+    q, _src = datafeed.quote(code, native=lambda: _tencent_quote(code))
+    return _normalize_quote(q)
+
+
 def fetch_52w(code):
     """东财 52 周最高/最低（push2delay 优先，失败回退 push2）"""
     market, _ = _market_prefix(code)
@@ -140,7 +156,8 @@ def fetch_52w(code):
     query = (f"api/qt/stock/get?secid={secid}&fields=f174,f175&invt=2&fltt=2")
     for host in ("push2delay.eastmoney.com", "push2.eastmoney.com"):
         try:
-            r = requests.get(f"https://{host}/{query}", headers=HEADERS, timeout=TIMEOUT)
+            r = datafeed.http_get(f"https://{host}/{query}", headers=HEADERS,
+                                  timeout=TIMEOUT, retries=1)
             data = (r.json() or {}).get("data") or {}
             high, low = data.get("f174"), data.get("f175")
             if high not in (None, "-", "") and low not in (None, "-", ""):
@@ -150,7 +167,7 @@ def fetch_52w(code):
     return None, None
 
 
-def fetch_financials(code):
+def _eastmoney_financials(code):
     """东财 datacenter 主要财务指标（年报，最多 5 年）"""
     market, _ = _market_prefix(code)
     url = "https://datacenter.eastmoney.com/securities/api/data/get"
@@ -163,14 +180,16 @@ def fetch_financials(code):
     }
     reports = []
     try:
-        data = requests.get(url, params=params, headers=HEADERS, timeout=TIMEOUT).json()
+        data = datafeed.get_json(url, params=params, headers=HEADERS, timeout=TIMEOUT,
+                                 retries=2)
         reports = (data.get("result") or {}).get("data") or []
     except Exception:
         reports = []
     if not reports:
         params["filter"] = f'(SECUCODE="{code}.{market}")'
         try:
-            data = requests.get(url, params=params, headers=HEADERS, timeout=TIMEOUT).json()
+            data = datafeed.get_json(url, params=params, headers=HEADERS, timeout=TIMEOUT,
+                                     retries=2)
             reports = (data.get("result") or {}).get("data") or []
         except Exception:
             reports = []
@@ -183,6 +202,12 @@ def fetch_financials(code):
             row[key] = float(v) if v not in (None, "-", "") else None
         out.append(row)
     return out
+
+
+def fetch_financials(code):
+    """东财 F10 主要财务指标（年报，最多 5 年）；东财不可用时降级 akshare"""
+    rows, _src = datafeed.financials(code, native=lambda: _eastmoney_financials(code))
+    return rows
 
 
 # ---------------- 市值验算 ----------------

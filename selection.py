@@ -27,11 +27,10 @@ import re
 import statistics
 import time
 
-import requests
-
 import eastmoney
 import quant_engine as Q
 import db
+import datafeed
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE, "数据")
@@ -58,9 +57,8 @@ HEADERS = {
 
 # ---------------- 数据抓取 ----------------
 def _sina_get(url, params=None, timeout=15):
-    r = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
-    r.raise_for_status()
-    return r.text
+    """新浪取数（统一重试/退避/限流）"""
+    return datafeed.get_text(url, params=params, headers=HEADERS, timeout=timeout)
 
 
 def _parse_sina_json(text):
@@ -107,26 +105,30 @@ def _sina_rank(rank_type, num=100):
 
 
 def fetch_rank_lists(num=100):
-    """抓取三榜；新浪失败时自动用内置 eastmoney 兜底"""
+    """抓取三榜；新浪失败用内置 eastmoney，再失败用 akshare 快照兜底"""
     lists = {}
     for rt in RANK_TYPES:
-        rows = []
+        def _eastmoney_rows(_rt=rt):
+            rows = eastmoney.get_hot_stocks(_rt, num)
+            return [{
+                "code": r["code"], "name": r["name"],
+                "price": r["price"], "change_pct": r["change_pct"],
+                "volume": 0.0, "amount_yuan": r["amount"] * 1e8,
+                "turnover": r["turnover"], "pe": r["pe"],
+                "nmc_yuan": r.get("total_mv", 0) * 1e8,
+                "mktcap_yuan": r.get("total_mv", 0) * 1e8,
+                "circ_shares": 0.0,
+            } for r in rows if r.get("price", 0) > 0]
+
         try:
-            rows = _sina_rank(rt, num)
-        except Exception:
-            try:
-                rows = eastmoney.get_hot_stocks(rt, num)
-                rows = [{
-                    "code": r["code"], "name": r["name"],
-                    "price": r["price"], "change_pct": r["change_pct"],
-                    "volume": 0.0, "amount_yuan": r["amount"] * 1e8,
-                    "turnover": r["turnover"], "pe": r["pe"],
-                    "nmc_yuan": r.get("total_mv", 0) * 1e8,
-                    "mktcap_yuan": r.get("total_mv", 0) * 1e8,
-                    "circ_shares": 0.0,
-                } for r in rows if r.get("price", 0) > 0]
-            except Exception:
-                rows = []
+            rows, _src = datafeed.fallback(f"{rt}榜", [
+                ("新浪", lambda _rt=rt: _sina_rank(_rt, num)),
+                ("东财", _eastmoney_rows),
+                ("akshare", lambda _rt=rt: datafeed.ak_rank(_rt, num)),
+            ])
+        except Exception as e:
+            rows = []
+            print(f"[选股] {rt} 榜抓取失败: {e}")
         lists[rt] = rows
     return lists
 
@@ -175,11 +177,9 @@ def fetch_stock_industry(code, fallback_map=None):
         return fallback_map[code]
     secid = ("1." if code.startswith(("6", "9")) else "0.") + code
     try:
-        r = requests.get("https://push2.eastmoney.com/api/qt/stock/get",
-                         params={"secid": secid, "fields": "f127"},
-                         headers=HEADERS, timeout=8)
-        r.raise_for_status()
-        d = r.json()
+        d = datafeed.get_json("https://push2.eastmoney.com/api/qt/stock/get",
+                              params={"secid": secid, "fields": "f127"},
+                              headers=HEADERS, timeout=8, retries=2)
         v = (d.get("data") or {}).get("f127")
         if v:
             return str(v).strip()
@@ -192,11 +192,9 @@ def fetch_index_kline(symbol=MARKET_INDEX, datalen=120):
     """腾讯指数日K（新浪指数接口会返回 2016 年旧数据，改用腾讯）"""
     end = datetime.date.today().strftime("%Y-%m-%d")
     beg = (datetime.date.today() - datetime.timedelta(days=int(datalen * 1.4) + 30)).strftime("%Y-%m-%d")
-    r = requests.get("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
-                     params={"param": f"{symbol},day,{beg},{end},{datalen},qfq"},
-                     headers=HEADERS, timeout=15)
-    r.raise_for_status()
-    d = r.json()
+    d = datafeed.get_json("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
+                          params={"param": f"{symbol},day,{beg},{end},{datalen},qfq"},
+                          headers=HEADERS, timeout=15)
     data = (d.get("data") or {}).get(symbol) or {}
     kl = data.get("qfqday") or data.get("day") or []
     if not kl:
@@ -729,9 +727,9 @@ def _lv_em_get(path, params, timeout=LOWVAL_TIMEOUT):
     for host in hosts:
         for _ in range(2):
             try:
-                r = requests.get(f"https://{host}{path}", params=params,
-                                 headers=LOWVAL_HEADERS, timeout=timeout)
-                data = r.json()
+                data = datafeed.get_json(f"https://{host}{path}", params=params,
+                                         headers=LOWVAL_HEADERS, timeout=timeout,
+                                         retries=1, min_interval=0.1)
                 if data:
                     _LV_HOST_OK["host"] = host
                     return data
@@ -1036,12 +1034,8 @@ def lowval_interleave_by_sector(rows, sector_of):
 
 
 # ---------------- 低值复苏：财务与复苏判定 ----------------
-def lowval_fetch_quarterly(code, force=False):
-    """东财 F10 主要财务指标（季报/半年报/年报，最新在前），当日缓存"""
-    cache = _lv_load_json(LOWVAL_FIN_CACHE_FILE) or {}
-    hit = cache.get(code) or {}
-    if not force and hit.get("fetched_at") == _lv_today() and hit.get("rows"):
-        return hit["rows"]
+def _lowval_fetch_eastmoney(code):
+    """东财 F10 主要财务指标（季报/半年报/年报，最新在前）"""
     market = "SH" if code.startswith(("6", "9", "5")) else (
         "BJ" if code.startswith(("4", "8")) else "SZ")
     params = {
@@ -1050,22 +1044,34 @@ def lowval_fetch_quarterly(code, force=False):
         "p": "1", "ps": "8", "sr": "-1", "st": "REPORT_DATE",
         "source": "HSF10", "client": "PC",
     }
+    data = datafeed.get_json("https://datacenter.eastmoney.com/securities/api/data/get",
+                             params=params, headers=LOWVAL_HEADERS,
+                             timeout=LOWVAL_TIMEOUT, retries=2)
     rows = []
+    for x in ((data.get("result") or {}).get("data") or []):
+        rows.append({
+            "report_date": (x.get("REPORT_DATE") or "")[:10],
+            "report_name": x.get("REPORT_DATE_NAME") or "",
+            "rev_growth": _lv_num(x.get("TOTALOPERATEREVETZ")),
+            "profit_growth": _lv_num(x.get("PARENTNETPROFITTZ")),
+            "roe": _lv_num(x.get("ROEJQ")),
+            "gross_margin": _lv_num(x.get("XSMLL")),
+            "net_margin": _lv_num(x.get("XSJLL")),
+            "debt_ratio": _lv_num(x.get("ZCFZL")),
+        })
+    return rows
+
+
+def lowval_fetch_quarterly(code, force=False):
+    """东财 F10 主要财务指标（季报/半年报/年报，最新在前），当日缓存；
+    东财不可用时降级 akshare"""
+    cache = _lv_load_json(LOWVAL_FIN_CACHE_FILE) or {}
+    hit = cache.get(code) or {}
+    if not force and hit.get("fetched_at") == _lv_today() and hit.get("rows"):
+        return hit["rows"]
     try:
-        r = requests.get("https://datacenter.eastmoney.com/securities/api/data/get",
-                         params=params, headers=LOWVAL_HEADERS, timeout=LOWVAL_TIMEOUT)
-        raw = (r.json().get("result") or {}).get("data") or []
-        for x in raw:
-            rows.append({
-                "report_date": (x.get("REPORT_DATE") or "")[:10],
-                "report_name": x.get("REPORT_DATE_NAME") or "",
-                "rev_growth": _lv_num(x.get("TOTALOPERATEREVETZ")),
-                "profit_growth": _lv_num(x.get("PARENTNETPROFITTZ")),
-                "roe": _lv_num(x.get("ROEJQ")),
-                "gross_margin": _lv_num(x.get("XSMLL")),
-                "net_margin": _lv_num(x.get("XSJLL")),
-                "debt_ratio": _lv_num(x.get("ZCFZL")),
-            })
+        rows, _src = datafeed.financials(
+            code, native=lambda: _lowval_fetch_eastmoney(code))
     except Exception:
         rows = []
     if rows:

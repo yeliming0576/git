@@ -13,12 +13,13 @@ top600”代替全市场，百分位含义为“在该活跃池内的相对位�
 需要 Tushare Pro（README 已声明）。离线/接口失败时自动降级：返回 None / 空。
 """
 import datetime
+import json
+import re
 import statistics
 import time
 
-import requests
-
 import db
+import datafeed
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 TIMEOUT = 20
@@ -49,9 +50,10 @@ def _fetch_rows():
         diff = []
         for host in hosts:
             try:
-                r = requests.get(url.replace("push2.eastmoney.com", host),
-                                 params=params, headers=HEADERS, timeout=8)
-                diff = ((r.json() or {}).get("data") or {}).get("diff") or []
+                data = datafeed.get_json(url.replace("push2.eastmoney.com", host),
+                                         params=params, headers=HEADERS, timeout=8,
+                                         retries=1, min_interval=0.1)
+                diff = ((data or {}).get("data") or {}).get("diff") or []
             except Exception:
                 diff = []
             if diff:
@@ -93,8 +95,67 @@ def _fetch_rows():
             break
         time.sleep(0.1)
     if len(rows) < 300:
+        # 东财不可用时依次降级：akshare 全市场快照 → 新浪成交额榜
+        for name, fn in (("akshare", _akshare_rows), ("新浪", _sina_rows)):
+            try:
+                rows = fn() or rows
+            except Exception as e:
+                print(f"[截面] {name} 兜底失败: {e}")
+            if len(rows) >= 300:
+                break
+    if len(rows) < 300:
         raise RuntimeError(f"活跃截面数据不足（仅 {len(rows)} 只）")
     return rows
+
+
+def _akshare_rows():
+    """akshare 全市场快照 → 与东财截面同构的行（降级用）"""
+    df = datafeed.ak_spot()
+    out = []
+    for _, r in df.iterrows():
+        n = datafeed._num
+        price = n(r.get("最新价"))
+        if not price or price <= 0:
+            continue
+        out.append({
+            "code": str(r.get("代码")), "name": str(r.get("名称") or ""),
+            "price": price, "change_pct": n(r.get("涨跌幅")),
+            "volume": (n(r.get("成交量")) or 0) * 100,
+            "amount": n(r.get("成交额")), "turnover": n(r.get("换手率")),
+            "pe": n(r.get("市盈率-动态")), "total_mv": n(r.get("总市值")),
+            "pb": n(r.get("市净率")),
+            "mom60": n(r.get("60日涨跌幅")), "yoy": n(r.get("年初至今涨跌幅")),
+        })
+    return out
+
+
+def _sina_rows(pages=MAX_PAGES):
+    """新浪成交额榜（多页拼活跃池）→ 与东财截面同构的行（降级用）"""
+    url = ("https://vip.stock.finance.sina.com.cn/quotes_service/"
+           "api/json_v2.php/Market_Center.getHQNodeData")
+    out, seen = [], set()
+    for page in range(1, pages + 1):
+        text = datafeed.get_text(url, params={
+            "page": page, "num": 100, "sort": "amount", "asc": 0, "node": "hs_a"},
+            headers=HEADERS, timeout=10, retries=1, min_interval=0.1)
+        fixed = re.sub(r"([{,])(\w+):", r'\1"\2":', text.strip())
+        for d in json.loads(fixed) or []:
+            code = str(d.get("code") or "")
+            price = datafeed._num(d.get("trade"))
+            if not code or code in seen or not price or price <= 0:
+                continue
+            seen.add(code)
+            out.append({
+                "code": code, "name": str(d.get("name") or ""),
+                "price": price, "change_pct": datafeed._num(d.get("changepercent")),
+                "volume": datafeed._num(d.get("volume")),
+                "amount": datafeed._num(d.get("amount")),
+                "turnover": datafeed._num(d.get("turnoverratio")),
+                "pe": datafeed._num(d.get("per")),
+                "total_mv": (datafeed._num(d.get("mktcap")) or 0) * 1e4,
+                "pb": None, "mom60": None, "yoy": None,
+            })
+    return out
 
 
 def get_snapshot(force=False):

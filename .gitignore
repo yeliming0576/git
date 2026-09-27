@@ -45,6 +45,7 @@ _清理备份_*.zip
 
 # ===== Python =====
 __pycache__/
+.pytest_cache/
 *.py[cod]
 *.egg-info/
 .venv/

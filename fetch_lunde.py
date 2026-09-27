@@ -9,8 +9,7 @@ import datetime
 import re
 import os
 
-import requests
-
+import datafeed
 BASE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(BASE, "lunde_data.json")
 HEADERS = {
@@ -26,8 +25,7 @@ def fetch_sina_kline(symbol="sh605060", datalen=260):
         "CN_MarketDataService.getKLineData"
         f"?symbol={symbol}&scale=240&ma=no&datalen={datalen}"
     )
-    r = requests.get(url, headers=HEADERS, timeout=20)
-    r.raise_for_status()
+    r = datafeed.http_get(url, headers=HEADERS, timeout=20)
     m = re.search(r"\((\[.*\])\)\s*;?\s*$", r.text, re.S)
     if not m:
         raise RuntimeError("新浪K线解析失败: " + r.text[:200])
@@ -51,9 +49,7 @@ def fetch_tencent_kline(symbol="sh605060", beg=None, end=None):
         "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
         f"?param={symbol},day,{beg},{end},500,qfq"
     )
-    r = requests.get(url, headers=HEADERS, timeout=20)
-    r.raise_for_status()
-    d = r.json()
+    d = datafeed.get_json(url, headers=HEADERS, timeout=20)
     data = d["data"][symbol]
     klines = data.get("qfqday") or data.get("day") or []
     rows = []
@@ -71,9 +67,8 @@ def fetch_tencent_kline(symbol="sh605060", beg=None, end=None):
 
 def fetch_tencent_quote(symbol="sh605060"):
     """腾讯实时行情(含换手率/量比/成交额/市值)"""
-    r = requests.get(f"https://qt.gtimg.cn/q={symbol}",
-                     headers=HEADERS, timeout=20)
-    r.encoding = "gbk"
+    r = datafeed.http_get(f"https://qt.gtimg.cn/q={symbol}",
+                          headers=HEADERS, timeout=20, encoding="gbk")
     txt = r.text.strip()
     f = txt.split("~")
     return {

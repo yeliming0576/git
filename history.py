@@ -10,8 +10,7 @@ import json
 import os
 import sqlite3
 
-import requests
-
+import datafeed
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36",
     "Referer": "https://gu.qq.com/",
@@ -54,11 +53,9 @@ def init_db():
 
 def _tencent_kline(symbol, beg, end, count, adj):
     """腾讯日K，返回原始行列表；count<=640 时稳定返回区间内最新 count 条"""
-    r = requests.get("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
-                     params={"param": f"{symbol},day,{beg},{end},{count},{adj}"},
-                     headers=HEADERS, timeout=20)
-    r.raise_for_status()
-    d = r.json()
+    d = datafeed.get_json("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
+                          params={"param": f"{symbol},day,{beg},{end},{count},{adj}"},
+                          headers=HEADERS, timeout=20)
     data = (d.get("data") or {}).get(symbol) or {}
     key = {"hfq": "hfqday", "qfq": "qfqday"}.get(adj, "day")
     kl = data.get(key) or data.get("day") or []
@@ -101,6 +98,16 @@ def fetch_history(code, adj="hfq", years=YEARS):
             except Exception:
                 continue
     # 去重 + 排序 + 清洗（剔除停牌日 volume==0）
+    if not all_rows:
+        # 腾讯全线失败时降级 akshare / efinance（返回已是标准字段）
+        try:
+            rows_fb, _src = datafeed.kline(
+                code, days=int(years * 250), adjust=adj, native=None)
+            all_rows = [{"date": r["date"], "open": r["open"], "close": r["close"],
+                         "high": r["high"], "low": r["low"], "volume": r["volume"]}
+                        for r in rows_fb]
+        except Exception as e:
+            print(f"[K线] 腾讯失败且兜底源不可用: {e}")
     seen = set()
     rows = []
     for r in sorted(all_rows, key=lambda x: x["date"]):
