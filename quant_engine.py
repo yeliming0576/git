@@ -11,6 +11,7 @@ import datetime
 
 import requests
 import v2  # noqa: E402  v2 规范分析模块
+import backtest_engine
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126",
@@ -205,62 +206,12 @@ def trend_signals(rows, ma5, ma10, ma20, dif, dea, vol_ma5, trail=0.12, vol_rati
 
 
 def backtest(rows, signals):
-    trades = []
-    pos = 0.0
-    entry_i = None
-    cash, shares = 1.0, 0.0
-    eq = []
-    for i in range(1, len(rows)):
-        sig = signals[i - 1]
-        if sig == "B" and pos == 0:
-            entry_i = i
-            pos = rows[i]["open"] * (1 + COST_RATE)      # 含成本实际买入价
-            shares = cash / pos
-            cash = 0.0
-        elif sig == "S" and pos > 0:
-            exit_px = rows[i]["open"] * (1 - COST_RATE)  # 含成本实际卖出价
-            trades.append({
-                "entry_date": rows[entry_i]["date"],
-                "entry_price": round(pos, 2),
-                "exit_date": rows[i]["date"],
-                "exit_price": round(exit_px, 2),
-                "ret": round((exit_px - pos) / pos * 100, 2),
-            })
-            cash = shares * exit_px
-            shares = 0.0
-            pos = 0.0
-            entry_i = None
-        eq.append(cash + shares * rows[i]["close"])
-    if pos > 0:
-        mark_px = rows[-1]["close"] * (1 - COST_RATE)
-        trades.append({
-            "entry_date": rows[entry_i]["date"],
-            "entry_price": round(pos, 2),
-            "exit_date": "持仓中",
-            "exit_price": round(mark_px, 2),
-            "ret": round((mark_px - pos) / pos * 100, 2),
-            "open": True,
-        })
-    wins = [t for t in trades if t["ret"] > 0]
-    losses = [t for t in trades if t["ret"] <= 0]
-    gross_win = sum(t["ret"] for t in wins)
-    gross_loss = abs(sum(t["ret"] for t in losses))
-    total_ret = math.prod(1 + t["ret"] / 100 for t in trades) - 1
-    pf = gross_win / gross_loss if gross_loss > 0 else float("inf")
-    max_e, mdd = 0.0, 0.0
-    for v in eq:
-        max_e = max(max_e, v)
-        mdd = max(mdd, (max_e - v) / max_e)
-    return {
-        "trades": trades, "n": len(trades),
-        "win_rate": round(len(wins) / len(trades) * 100, 1) if trades else 0,
-        "avg_win": round(gross_win / len(wins), 2) if wins else 0,
-        "avg_loss": round(-gross_loss / len(losses), 2) if losses else 0,
-        "profit_factor": round(pf, 2) if pf != float("inf") else None,
-        "total_ret": round(total_ret * 100, 2),
-        "max_drawdown": round(mdd * 100, 2),
-        "eq": eq,
-    }
+    """信号数组撮合（T 日信号 → T+1 开盘、含双边成本）。
+
+    撮合与统计口径已统一到 backtest_engine，本函数保留原返回结构。
+    """
+    res = backtest_engine.run_signals(rows, signals, cost=COST_RATE)
+    return res["stats"]
 
 
 # ---------------- 综合分析 ----------------

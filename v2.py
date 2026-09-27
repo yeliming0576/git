@@ -20,16 +20,18 @@ import random
 import statistics
 
 import history
+import backtest_engine
 
-COST_PER_SIDE = 0.0015       # 往返 0.30%（佣金+印花税+过户费+滑点，组合规范取值）
-RF_ANNUAL = 0.02             # 无风险利率 2%
+# 回测口径统一到 backtest_engine（下列常量保留为别名，外部引用不受影响）
+COST_PER_SIDE = backtest_engine.COST_PER_SIDE
+RF_ANNUAL = backtest_engine.RF_ANNUAL
 EQUITY_DEFAULT = 100000.0    # 报告用总权益（元）
 RISK_PER_TRADE = 0.01        # 单笔风险预算 1%
 MAX_POSITION_PCT = 0.20      # 单票上限 20%
 PERM_N = 200                 # 随机对照抽样次数（规范 1000，控制运行时间）
 # 规范内部矛盾修正：目标=entry+3ATR、止损=entry-2ATR 时盈亏比恒为1.5<2，
 # 故目标位按 4×ATR 实现（=2:1），保证“盈亏比≥2”过滤可执行
-TARGET_ATR_MULT = 4.0
+TARGET_ATR_MULT = backtest_engine.TARGET_ATR_MULT
 CACHE_VERSION = 3            # v2 结果缓存版本（规则/口径变更时+1，自动重算）
 
 
@@ -226,182 +228,42 @@ def status_of(f, i, name, ma_period=60, rs_threshold=70, abs_i=None, cs=None):
 # ---------------- 回测 ----------------
 def backtest(rows, f, name, atr_stop_mult=2.0, ma_period=60, rs_threshold=70,
              start_i=250, offset=0):
-    """信号次日开盘执行；一字涨跌停建模；初始2×ATR + 吊灯3×ATR22；成本双边"""
-    trades = []
-    cash, shares, entry_px, stop = 1.0, 0.0, 0.0, 0.0
-    entry_i = None
-    exit_pending = False
-    equity = []
-    for i in range(len(rows)):
-        r = rows[i]
-        if shares > 0:
-            # 吊灯止损（只上移）
-            if i >= 21 and f[i].get("atr22"):
-                hi22 = max(rows[j]["high"] for j in range(i - 21, i + 1))
-                chand = hi22 - 3.0 * f[i]["atr22"]
-                stop = max(stop, chand)
-            # 出场触发（收盘判定）
-            st = status_of(f, i, name, ma_period, rs_threshold, abs_i=i + offset)
-            d = f[i]
-            ma_break = (d.get("ma") is not None and d["close"] < d["ma"] and
-                        i >= 1 and f[i - 1].get("ma") is not None and
-                        rows[i - 1]["close"] < f[i - 1]["ma"])
-            rs_weak = d.get("rs20") is not None and d["rs20"] < -0.05
-            if exit_pending or r["close"] <= stop or ma_break or rs_weak:
-                exit_pending = True
-        if exit_pending and shares > 0:
-            k = i + 1
-            while k < len(rows) and rows[k]["limit_down"]:
-                k += 1
-            if k < len(rows):
-                px = rows[k]["open"] * (1 - COST_PER_SIDE)
-                trades.append({
-                    "entry_date": rows[entry_i]["date"], "exit_date": rows[k]["date"],
-                    "entry": round(entry_px, 2), "exit": round(px, 2),
-                    "ret": round((px - entry_px) / entry_px * 100, 2),
-                    "days": k - entry_i,
-                })
-                cash = shares * px
-                shares, stop, entry_px, entry_i, exit_pending = 0.0, 0.0, 0.0, None, False
-        if shares == 0 and not exit_pending and i >= start_i and i + 1 < len(rows):
-            st = status_of(f, i, name, ma_period, rs_threshold, abs_i=i + offset)
-            if st["status"] == "强势可入":
-                j = i + 1
-                if rows[j]["limit_up"]:
-                    gap = rows[j]["open"] / rows[j - 1]["close"] - 1 if j > 0 else 0
-                    if gap >= rows[j]["limit_pct"] - 0.005:
-                        pass  # 一字涨停无法买入，放弃
-                    else:
-                        entry_open = rows[j]["open"]
-                        atr = f[i]["atr20"] or 0
-                        if atr > 0:
-                            entry_proxy = entry_open * (1 + COST_PER_SIDE)
-                            stop0 = entry_proxy - atr_stop_mult * atr
-                            target = entry_proxy + TARGET_ATR_MULT * atr
-                            if stop0 > 0 and (target - entry_proxy) / (entry_proxy - stop0) >= 2.0:
-                                entry_px = entry_proxy
-                                stop = stop0
-                                shares = cash / entry_px
-                                cash = 0.0
-                                entry_i = j
-                else:
-                    entry_open = rows[j]["open"]
-                    atr = f[i]["atr20"] or 0
-                    if atr > 0:
-                        entry_proxy = entry_open * (1 + COST_PER_SIDE)
-                        stop0 = entry_proxy - atr_stop_mult * atr
-                        target = entry_proxy + TARGET_ATR_MULT * atr
-                        if stop0 > 0 and (target - entry_proxy) / (entry_proxy - stop0) >= 2.0:
-                            entry_px = entry_proxy
-                            stop = stop0
-                            shares = cash / entry_px
-                            cash = 0.0
-                            entry_i = j
-        equity.append(cash + shares * rows[i]["close"])
-    if shares > 0:
-        trades.append({"entry_date": rows[entry_i]["date"], "exit_date": "持仓中",
-                       "entry": round(entry_px, 2), "exit": round(rows[-1]["close"], 2),
-                       "ret": round((rows[-1]["close"] - entry_px) / entry_px * 100, 2),
-                       "days": len(rows) - 1 - entry_i, "open": True})
-    return trades, equity
+    """信号次日开盘执行；一字涨跌停建模；初始2×ATR + 吊灯3×ATR22；成本双边。
+
+    撮合口径已统一到 backtest_engine，本函数保留原签名与 (trades, equity) 返回结构。
+    """
+    res = backtest_engine.run(
+        rows, f,
+        lambda i: status_of(f, i, name, ma_period, rs_threshold, abs_i=i + offset),
+        atr_stop_mult=atr_stop_mult, start_i=start_i)
+    return res["trades"], res["equity"]
 
 
 def metrics(trades, equity, index_close_first, index_close_last):
-    n = len([t for t in trades if not t.get("open")])
-    wins = [t for t in trades if t["ret"] > 0 and not t.get("open")]
-    losses = [t for t in trades if t["ret"] <= 0 and not t.get("open")]
-    win_rate = len(wins) / n * 100 if n else None
-    avg_win = statistics.mean([t["ret"] for t in wins]) if wins else 0.0
-    avg_loss = statistics.mean([t["ret"] for t in losses]) if losses else 0.0
-    gross_w = sum(t["ret"] for t in wins)
-    gross_l = abs(sum(t["ret"] for t in losses))
-    pf = gross_w / gross_l if gross_l > 0 else (float("inf") if wins else None)
-    expectancy = (win_rate / 100 * avg_win - (1 - win_rate / 100) * avg_loss) if win_rate is not None else None
-    days = len(equity)
-    if days > 1 and equity[-1] > 0:
-        cagr = (equity[-1] / equity[0]) ** (252 / days) - 1
-    else:
-        cagr = 0.0
-    peak, mdd = 0.0, 0.0
-    for v in equity:
-        peak = max(peak, v)
-        mdd = max(mdd, (peak - v) / peak)
-    daily = [equity[i] / equity[i - 1] - 1 for i in range(1, len(equity)) if equity[i - 1] > 0]
-    sd = statistics.pstdev(daily) if len(daily) > 2 else 0.0
-    sharpe = ((statistics.mean(daily) - RF_ANNUAL / 252) / sd * math.sqrt(252)) if sd > 0 else 0.0
-    calmar = cagr / mdd if mdd > 0 else 0.0
-    bench_cagr = (index_close_last / index_close_first) ** (252 / days) - 1 if index_close_first > 0 and days > 1 else 0.0
-    ci = 1.96 * math.sqrt((win_rate / 100) * (1 - win_rate / 100) / n) * 100 if n >= 30 and win_rate is not None else None
-    return {
-        "n": n, "win_rate": round(win_rate, 1) if win_rate is not None else None,
-        "ci": round(ci, 1) if ci is not None else None,
-        "avg_win": round(avg_win, 2), "avg_loss": round(avg_loss, 2),
-        "pf": pf, "expectancy": round(expectancy, 2) if expectancy is not None else None,
-        "cagr": round(cagr * 100, 2), "mdd": round(mdd * 100, 2),
-        "sharpe": round(sharpe, 2), "calmar": round(calmar, 2),
-        "bench_cagr": round(bench_cagr * 100, 2),
-        "excess": round((cagr - bench_cagr) * 100, 2),
-        "trades": trades,
-    }
+    """绩效统计（口径已统一到 backtest_engine.metrics）"""
+    return backtest_engine.metrics(trades, equity, index_close_first, index_close_last)
 
 
 def permutation_p(trades, equity):
     """随机对照：保持交易次数与持仓天数分布，随机重排买入日期，返回 p 值"""
-    real = (equity[-1] / equity[0] - 1) if equity else 0
-    closed = [t for t in trades if not t.get("open")]
-    if len(closed) < 5:
-        return None
-    days = [t["days"] for t in closed]
-    n_better = 0
-    for _ in range(PERM_N):
-        random.shuffle(days)
-        cur = 1.0
-        idx = 0
-        for d in days:
-            if idx + d >= len(equity):
-                break
-            cur *= equity[idx + d] / equity[idx]
-            idx += d + 1
-        if cur - 1 >= real:
-            n_better += 1
-    return n_better / PERM_N
+    return backtest_engine.permutation_p(trades, equity, n_iter=PERM_N)
 
 
 def walk_forward(rows, f, name, years=8):
     """训练3年/测试1年前滚：拼接样本外区间的交易"""
-    dates = [r["date"] for r in rows]
-    start_year = int(dates[0][:4]) + 3
-    end_year = int(dates[-1][:4])
-    trades_all, eq_all = [], [1.0]
-    for test_year in range(start_year, end_year + 1):
-        lo = f"{test_year}-01-01"
-        hi = f"{test_year}-12-31"
-        i0 = next((i for i, d in enumerate(dates) if d >= lo), None)
-        i1 = next((i for i, d in enumerate(dates) if d > hi), len(rows))
-        if i0 is None or i0 >= i1 or i0 < 250:
-            continue
-        sub_rows = rows[i0:i1]
-        sub_f = f[i0:i1]
-        tr, eq = backtest(sub_rows, sub_f, name, start_i=0, offset=i0)
-        trades_all += tr
-        eq_all.extend([eq_all[-1] * (v / eq[0]) for v in eq[1:]])
-    return trades_all, eq_all
+    def factory(i0, sub_rows, sub_f):
+        return lambda i: status_of(sub_f, i, name, abs_i=i + i0)
+    return backtest_engine.walk_forward(rows, f, factory, years=years)
 
 
 def grid_test(rows, f, name):
     """参数敏感性网格：ATR倍数×MA周期×RS阈值"""
-    out = []
     index_map = _index_map(rows)
     feat = {ma_p: build_features(rows, index_map, ma_period=ma_p) for ma_p in (40, 60, 80)}
-    for atr_m in (1.5, 2.0, 2.5):
-        for ma_p in (40, 60, 80):
-            for rs_t in (60, 70, 80):
-                tr, eq = backtest(rows, feat[ma_p], name, atr_stop_mult=atr_m,
-                                  ma_period=ma_p, rs_threshold=rs_t)
-                m = metrics(tr, eq, eq[0], eq[-1])
-                out.append({"atr": atr_m, "ma": ma_p, "rs": rs_t,
-                            "n": m["n"], "cagr": m["cagr"], "mdd": m["mdd"]})
-    return out
+    return backtest_engine.grid(
+        rows, feat,
+        lambda ma_p, atr_m, rs_t: (
+            lambda i: status_of(feat[ma_p], i, name, ma_p, rs_t)))
 
 
 def _index_map(rows):
