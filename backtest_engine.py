@@ -22,13 +22,14 @@ import math
 import random
 import statistics
 
+import config as C
 import log_utils
 
-COST_PER_SIDE = 0.0015       # 往返 0.30%（佣金+印花税+过户费+滑点）
-RF_ANNUAL = 0.02             # 无风险利率 2%
-TARGET_ATR_MULT = 4.0        # 目标位 4×ATR，保证盈亏比 >= 2:1
-PERM_N = 200                 # 随机对照抽样次数
-MIN_SAMPLE = 30              # 样本不足门槛（不足则标注"样本不足"）
+COST_PER_SIDE = C.COST_PER_SIDE       # 单边成本（往返 0.30%）
+RF_ANNUAL = C.RF_ANNUAL               # 无风险利率
+TARGET_ATR_MULT = C.TARGET_ATR_MULT   # 目标位 4×ATR，保证盈亏比 >= 2:1
+PERM_N = C.PERM_N                     # 随机对照抽样次数
+MIN_SAMPLE = C.MIN_SAMPLE             # 样本不足门槛
 
 log = log_utils.get_logger("backtest")
 

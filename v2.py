@@ -21,14 +21,15 @@ import statistics
 
 import history
 import backtest_engine
+import config as C
 
 # 回测口径统一到 backtest_engine（下列常量保留为别名，外部引用不受影响）
 COST_PER_SIDE = backtest_engine.COST_PER_SIDE
 RF_ANNUAL = backtest_engine.RF_ANNUAL
-EQUITY_DEFAULT = 100000.0    # 报告用总权益（元）
-RISK_PER_TRADE = 0.01        # 单笔风险预算 1%
-MAX_POSITION_PCT = 0.20      # 单票上限 20%
-PERM_N = 200                 # 随机对照抽样次数（规范 1000，控制运行时间）
+EQUITY_DEFAULT = C.EQUITY_DEFAULT    # 报告用总权益（元）
+RISK_PER_TRADE = C.RISK_PER_TRADE    # 单笔风险预算
+MAX_POSITION_PCT = C.MAX_POSITION_PCT
+PERM_N = C.PERM_N
 # 规范内部矛盾修正：目标=entry+3ATR、止损=entry-2ATR 时盈亏比恒为1.5<2，
 # 故目标位按 4×ATR 实现（=2:1），保证“盈亏比≥2”过滤可执行
 TARGET_ATR_MULT = backtest_engine.TARGET_ATR_MULT

@@ -22,16 +22,17 @@ from urllib.parse import urlsplit
 
 import requests
 
+import config as C
 import log_utils
 
 log = log_utils.get_logger("datafeed")
 
 DEFAULT_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/126 Safari/537.36")
-DEFAULT_TIMEOUT = 15         # 单次请求超时（秒）
-DEFAULT_RETRIES = 3          # 单 URL 重试次数
-DEFAULT_BACKOFF = 1.5        # 退避底数：等待 = BACKOFF ** 尝试次数
-MIN_INTERVAL = 0.3           # 同一 host 两次请求的最小间隔（秒）
+DEFAULT_TIMEOUT = C.HTTP_TIMEOUT      # 单次请求超时（秒）
+DEFAULT_RETRIES = C.HTTP_RETRIES      # 单 URL 重试次数
+DEFAULT_BACKOFF = C.HTTP_BACKOFF      # 退避底数：等待 = BACKOFF ** 尝试次数
+MIN_INTERVAL = C.HTTP_MIN_INTERVAL    # 同一 host 两次请求的最小间隔（秒）
 
 
 class DataFeedError(RuntimeError):

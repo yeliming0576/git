@@ -18,10 +18,12 @@ import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import config as C
+
 BASE = os.path.dirname(os.path.abspath(__file__))
-HOST = "0.0.0.0"
-PORT = 8765
-INTERVAL = 300   # 自动刷新间隔（秒），默认 5 分钟
+HOST = C.HOST
+PORT = C.PORT
+INTERVAL = C.INTERVAL   # 自动刷新间隔（秒），默认 5 分钟
 LOCK = threading.Lock()   # 多人同时刷新/保存/编辑自选股时互斥，避免写坏文件
 PID_FILE = os.path.join(BASE, "网页服务.pid")
 

@@ -12,14 +12,15 @@ import datetime
 import v2  # noqa: E402  v2 规范分析模块
 import backtest_engine
 import datafeed
+import config as C
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126",
     "Referer": "https://finance.sina.com.cn",
 }
 
-# 交易成本（佣金+印花税+过户费+滑点），往返 0.30%，单边取 0.15%
-COST_RATE = 0.0015
+# 交易成本（佣金+印花税+过户费+滑点），往返 0.30%，单边取 0.15%（口径见 config.py）
+COST_RATE = C.COST_PER_SIDE
 
 
 # ---------------- 数据抓取 ----------------

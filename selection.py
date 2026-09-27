@@ -31,22 +31,23 @@ import eastmoney
 import quant_engine as Q
 import db
 import datafeed
+import config as C
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE, "数据")
 HISTORY_FILE = os.path.join(DATA_DIR, "排名历史.json")
 CACHE_FILE = os.path.join(DATA_DIR, "热门股缓存.json")
 
-# ============ 可调参数（想改规则只改这里） ============
-PRICE_MEDIAN_MULTIPLE = 2.5   # 股价上限 = 全市场股价中位数 × 倍数
-PRICE_CAP_FLOOR = 12.0        # 股价上限绝对底限（元），与动态值取大
-PRICE_FLOOR = 2.0             # 股价下限（元），过滤低价垃圾股
-TURNOVER_FLOOR = 1.0          # 换手率绝对底线（%），低于直接淘汰
-SHORTLIST_SIZE = 20           # 进入 20 日分位数检查的候选数量
-PERCENTILE_LEVEL = 0.2        # 当日活跃度需高于过去 20 日的第 20 分位
-PERCENTILE_RELAX = 0.1        # 候选不足时的放宽分位
-HISTORY_DAYS = 5              # 多日持续性统计用最近 N 个交易日
-MARKET_INDEX = "sh000985"     # 中证全指
+# ============ 可调参数（默认值集中在 config.py，可用 config.json 覆盖） ============
+PRICE_MEDIAN_MULTIPLE = C.PRICE_MEDIAN_MULTIPLE
+PRICE_CAP_FLOOR = C.PRICE_CAP_FLOOR
+PRICE_FLOOR = C.PRICE_FLOOR
+TURNOVER_FLOOR = C.TURNOVER_FLOOR
+SHORTLIST_SIZE = C.SHORTLIST_SIZE
+PERCENTILE_LEVEL = C.PERCENTILE_LEVEL
+PERCENTILE_RELAX = C.PERCENTILE_RELAX
+HISTORY_DAYS = C.HISTORY_DAYS
+MARKET_INDEX = C.MARKET_INDEX
 RANK_TYPES = ("volume", "amount", "turnover")
 
 HEADERS = {
@@ -585,27 +586,25 @@ def heat_exclude(codes, rows_map):
 #     换手 3%~8% ｜ PE 低于所属板块内中位数 ｜ 最新报告期营收与净利同比双正且较上期改善
 #   附带：大盘环境提示、热度剔除（5日暴涨/连续涨停）、分级放宽留痕、当日缓存
 # ==================================================================
-LOWVAL_TURNOVER_MIN = 3.0              # 换手率下限（%）
-LOWVAL_TURNOVER_MAX = 8.0              # 换手率上限（%）
-LOWVAL_TURNOVER_RELAX = (2.0, 12.0)    # 分级放宽时的换手区间
-LOWVAL_SHORTLIST_SIZE = 20             # 成交额排序后进入财务核验的候选数
-LOWVAL_SHORTLIST_MAX = 40              # 放宽后最多核验的候选数
-LOWVAL_LIMIT = 5                       # 目标只数
-LOWVAL_W_RECOVERY = 0.45               # 打分权重：复苏强度
-LOWVAL_W_VALUE = 0.35                  # 打分权重：估值便宜程度
-LOWVAL_W_TURNOVER = 0.20               # 打分权重：换手活跃度（区间中位最优）
-LOWVAL_PE_MIN_SAMPLE = 8               # 板块内 PE 样本不足时改用全市场中位数
-LOWVAL_BOARD_PAGES = 2                 # 每个板块只取成交额前 N 页（100 条/页）
-LOWVAL_HEAT_RET5_CAP = 0.25            # 5 日涨幅超过该值视为过热，剔除
-LOWVAL_HEAT_LIMIT_DAYS = 2             # 近 3 日内涨停次数达到该值，剔除
-LOWVAL_BOARD_CACHE_DAYS = 7            # 板块表缓存有效期（天）
-LOWVAL_TIMEOUT = 12
-LOWVAL_MARKET_FS = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
-LOWVAL_MARKET_PAGES = 6                # 全市场活跃池：成交额前 6 页（约 600 只）
-LOWVAL_FIELDS = "f2,f3,f5,f6,f8,f9,f12,f14,f20,f23,f100"
-LOWVAL_HOSTS = ["push2.eastmoney.com", "1.push2.eastmoney.com",
-                "33.push2.eastmoney.com", "82.push2.eastmoney.com",
-                "push2delay.eastmoney.com"]
+LOWVAL_TURNOVER_MIN = C.LOWVAL_TURNOVER_MIN
+LOWVAL_TURNOVER_MAX = C.LOWVAL_TURNOVER_MAX
+LOWVAL_TURNOVER_RELAX = C.LOWVAL_TURNOVER_RELAX
+LOWVAL_SHORTLIST_SIZE = C.LOWVAL_SHORTLIST_SIZE
+LOWVAL_SHORTLIST_MAX = C.LOWVAL_SHORTLIST_MAX
+LOWVAL_LIMIT = C.LOWVAL_LIMIT
+LOWVAL_W_RECOVERY = C.LOWVAL_W_RECOVERY
+LOWVAL_W_VALUE = C.LOWVAL_W_VALUE
+LOWVAL_W_TURNOVER = C.LOWVAL_W_TURNOVER
+LOWVAL_PE_MIN_SAMPLE = C.LOWVAL_PE_MIN_SAMPLE
+LOWVAL_BOARD_PAGES = C.LOWVAL_BOARD_PAGES
+LOWVAL_HEAT_RET5_CAP = C.LOWVAL_HEAT_RET5_CAP
+LOWVAL_HEAT_LIMIT_DAYS = C.LOWVAL_HEAT_LIMIT_DAYS
+LOWVAL_BOARD_CACHE_DAYS = C.LOWVAL_BOARD_CACHE_DAYS
+LOWVAL_TIMEOUT = C.LOWVAL_TIMEOUT
+LOWVAL_MARKET_FS = C.LOWVAL_MARKET_FS
+LOWVAL_MARKET_PAGES = C.LOWVAL_MARKET_PAGES
+LOWVAL_FIELDS = C.LOWVAL_FIELDS
+LOWVAL_HOSTS = list(C.LOWVAL_HOSTS)
 LOWVAL_BOARD_MAP_FILE = os.path.join(DATA_DIR, "板块映射.json")
 LOWVAL_FIN_CACHE_FILE = os.path.join(DATA_DIR, "低值复苏_财务缓存.json")
 LOWVAL_POOL_CACHE_FILE = os.path.join(DATA_DIR, "低值复苏_池缓存.json")
