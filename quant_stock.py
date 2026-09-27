@@ -25,12 +25,12 @@ def main():
     for code in codes:
         try:
             a = Q.analyze(code)
-            analyses.append((code, "用户选股", a))
+            analyses.append((code, "用户选股", a, None))
             print(f"完成: {a['quote']['name']}({code}) {a['verdict']} "
                   f"半年{a['half_ret']:+.2f}% 回测{a['bt']['total_ret']}%")
         except Exception as e:
             print(f"[{code}] 失败: {e}")
-            analyses.append((code, "用户选股", None))
+            analyses.append((code, "用户选股", None, None))
     title = f"用户选股量化分析 {today}"
     note = "自选股: " + "、".join(codes) + " | 每只含趋势判断/买卖点/策略回测/交易量"
     html = build_report_html(analyses, title, note, now)

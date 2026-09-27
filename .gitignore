@@ -12,6 +12,8 @@ journal.db
 每日热门股_*.txt
 组合与执行报告.html
 联德股份_量化交易分析报告.html
+恒立液压投资研究报告_*.html
+恒立液压投资研究报告_*.md
 报告归档/
 # 分类归档目录（数据/日志）
 数据/
@@ -34,6 +36,12 @@ reports/
 *.pid
 网页服务.pid
 LAN_SHARE.flag
+
+# ===== 打包与备份产物 =====
+build/
+dist/
+_清理备份_*.zip
+打包日志*.txt
 
 # ===== Python =====
 __pycache__/

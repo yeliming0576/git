@@ -15,6 +15,9 @@
     result["picks"]  -> [{"code","name","price","change_pct","amount",
                           "turnover","pe","total_mv","score"}, ...]
     result["meta"]   -> {"market_ok","warnings","notes","from_cache","fetched_at"}
+
+低值复苏选股（网页 /lowval 专用，见文件底部 LOWVAL_ 段落）：
+    selection.pick_lowval("科技,医药")   # 换手3~8% + PE低于板块中位数 + 业绩同比双正且改善
 """
 import datetime
 import json
@@ -576,6 +579,855 @@ def heat_exclude(codes, rows_map):
             out |= {c for c, v in key.items() if v > th95}
     out |= {c for c, n in lim3.items() if n >= 2}
     return out
+
+
+# ==================================================================
+# 低值复苏选股（网页单页 /lowval 专用，与上面的热度选股相互独立）
+#   输入板块（科技 / 农业 / 医药 …）→ 输出 5 只同时满足：
+#     换手 3%~8% ｜ PE 低于所属板块内中位数 ｜ 最新报告期营收与净利同比双正且较上期改善
+#   附带：大盘环境提示、热度剔除（5日暴涨/连续涨停）、分级放宽留痕、当日缓存
+# ==================================================================
+LOWVAL_TURNOVER_MIN = 3.0              # 换手率下限（%）
+LOWVAL_TURNOVER_MAX = 8.0              # 换手率上限（%）
+LOWVAL_TURNOVER_RELAX = (2.0, 12.0)    # 分级放宽时的换手区间
+LOWVAL_SHORTLIST_SIZE = 20             # 成交额排序后进入财务核验的候选数
+LOWVAL_SHORTLIST_MAX = 40              # 放宽后最多核验的候选数
+LOWVAL_LIMIT = 5                       # 目标只数
+LOWVAL_W_RECOVERY = 0.45               # 打分权重：复苏强度
+LOWVAL_W_VALUE = 0.35                  # 打分权重：估值便宜程度
+LOWVAL_W_TURNOVER = 0.20               # 打分权重：换手活跃度（区间中位最优）
+LOWVAL_PE_MIN_SAMPLE = 8               # 板块内 PE 样本不足时改用全市场中位数
+LOWVAL_BOARD_PAGES = 2                 # 每个板块只取成交额前 N 页（100 条/页）
+LOWVAL_HEAT_RET5_CAP = 0.25            # 5 日涨幅超过该值视为过热，剔除
+LOWVAL_HEAT_LIMIT_DAYS = 2             # 近 3 日内涨停次数达到该值，剔除
+LOWVAL_BOARD_CACHE_DAYS = 7            # 板块表缓存有效期（天）
+LOWVAL_TIMEOUT = 12
+LOWVAL_MARKET_FS = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
+LOWVAL_MARKET_PAGES = 6                # 全市场活跃池：成交额前 6 页（约 600 只）
+LOWVAL_FIELDS = "f2,f3,f5,f6,f8,f9,f12,f14,f20,f23,f100"
+LOWVAL_HOSTS = ["push2.eastmoney.com", "1.push2.eastmoney.com",
+                "33.push2.eastmoney.com", "82.push2.eastmoney.com",
+                "push2delay.eastmoney.com"]
+LOWVAL_BOARD_MAP_FILE = os.path.join(DATA_DIR, "板块映射.json")
+LOWVAL_FIN_CACHE_FILE = os.path.join(DATA_DIR, "低值复苏_财务缓存.json")
+LOWVAL_POOL_CACHE_FILE = os.path.join(DATA_DIR, "低值复苏_池缓存.json")
+
+LOWVAL_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "Chrome/126 Safari/537.36",
+    "Referer": "https://quote.eastmoney.com/",
+}
+_LV_HOST_OK = {"host": None}            # 记住可用的东财镜像节点
+
+# 东财行业板块代码表（实测自东财行业板块 m:90+t:2）
+LOWVAL_BOARD_CODES = {
+    # 电子 / 计算机 / 通信
+    "电子": "BK1201", "半导体": "BK1036", "消费电子": "BK1037", "光学光电子": "BK1038",
+    "元件": "BK0459", "电子化学品Ⅱ": "BK1039", "其他电子Ⅱ": "BK1223",
+    "半导体材料": "BK1325", "半导体设备": "BK1326", "数字芯片设计": "BK1331",
+    "集成电路制造": "BK1329", "集成电路封测": "BK1328", "被动元件": "BK1339",
+    "印制电路板": "BK1340", "面板": "BK1335", "LED": "BK1333",
+    "计算机": "BK1207", "计算机设备": "BK0735", "软件开发": "BK0737", "IT服务Ⅱ": "BK1238",
+    "通信": "BK1215", "通信设备": "BK0448", "通信服务": "BK0736",
+    "通信网络设备及器件": "BK1591",
+    "传媒": "BK0486", "游戏Ⅱ": "BK1046", "广告营销": "BK1220",
+    # 农林牧渔
+    "农林牧渔": "BK0433", "养殖业": "BK1259", "种植业": "BK1261", "饲料": "BK1258",
+    "农产品加工": "BK1256", "渔业": "BK1260", "林业Ⅱ": "BK1255", "农业综合Ⅱ": "BK1257",
+    "动物保健Ⅱ": "BK1254", "农化制品": "BK0731", "农用机械": "BK1404",
+    "生猪养殖": "BK1512", "肉鸡养殖": "BK1511", "种子": "BK1518", "复合肥": "BK1433",
+    # 医药
+    "医药生物": "BK1216", "化学制药": "BK0465", "中药Ⅱ": "BK1040", "生物制品": "BK1044",
+    "医疗器械": "BK1041", "医疗服务": "BK0727", "医药商业": "BK1042",
+    "原料药": "BK1595", "血液制品": "BK1597", "疫苗": "BK1598", "体外诊断": "BK1603",
+    # 消费
+    "食品饮料": "BK0438", "家用电器": "BK0456", "美容护理": "BK1035", "纺织服饰": "BK0436",
+    "商贸零售": "BK1213", "社会服务": "BK1214", "白酒Ⅱ": "BK1277", "调味发酵品Ⅱ": "BK1278",
+    "零食": "BK1583", "肉制品": "BK1580", "酒店餐饮": "BK1271",
+    # 新能源 / 电力
+    "电力设备": "BK1200", "光伏设备": "BK1031", "风电设备": "BK1032", "电池": "BK1033",
+    "锂电池": "BK1303", "逆变器": "BK1320", "电网设备": "BK0457", "电力": "BK0428",
+    # 金融 / 地产 / 周期
+    "银行Ⅱ": "BK0475", "非银金融": "BK1203", "证券Ⅱ": "BK0473", "保险Ⅱ": "BK0474",
+    "房地产": "BK1202", "钢铁": "BK0479", "煤炭": "BK0437", "有色金属": "BK0478",
+    "基础化工": "BK1206", "化学制品": "BK0538", "石油石化": "BK0464",
+    "机械设备": "BK1205", "通用设备": "BK0545", "专用设备": "BK0910", "机器人": "BK1408",
+    "国防军工": "BK1204", "汽车": "BK1211", "乘用车": "BK1262", "汽车零部件": "BK0481",
+    "建筑装饰": "BK1209", "建筑材料": "BK1208", "环保": "BK0728", "公用事业": "BK0427",
+}
+
+# 关键词 → 东财行业板块（输入"科技"即展开；多个关键词取并集）
+LOWVAL_SECTOR_ALIAS = {
+    "科技": ["半导体", "消费电子", "光学光电子", "元件", "电子化学品Ⅱ",
+             "计算机设备", "软件开发", "IT服务Ⅱ", "通信设备", "通信服务"],
+    "农业": ["养殖业", "种植业", "饲料", "农产品加工", "渔业", "林业Ⅱ",
+             "农业综合Ⅱ", "动物保健Ⅱ", "农化制品", "农用机械"],
+    "医药": ["化学制药", "中药Ⅱ", "生物制品", "医疗器械", "医疗服务", "医药商业"],
+    "消费": ["食品饮料", "家用电器", "美容护理", "纺织服饰", "商贸零售", "社会服务"],
+    "新能源": ["光伏设备", "风电设备", "电池", "锂电池", "逆变器"],
+    "电力设备": ["电力设备", "电网设备", "电力"],
+    "金融": ["银行Ⅱ", "非银金融", "证券Ⅱ", "保险Ⅱ"],
+    "军工": ["国防军工"],
+    "汽车": ["汽车", "乘用车", "汽车零部件"],
+    "化工": ["基础化工", "化学制品", "农化制品"],
+    "有色": ["有色金属"],
+    "机械": ["机械设备", "通用设备", "专用设备", "机器人"],
+    "传媒": ["传媒", "游戏Ⅱ", "广告营销"],
+    "地产": ["房地产"],
+    "半导体": ["半导体", "半导体材料", "半导体设备", "数字芯片设计",
+               "集成电路制造", "集成电路封测"],
+    "AI算力": ["半导体", "半导体设备", "数字芯片设计", "通信网络设备及器件",
+               "IT服务Ⅱ", "软件开发"],
+    "白酒": ["白酒Ⅱ"],
+    "中药": ["中药Ⅱ"],
+}
+LOWVAL_PRESET_SECTORS = ["科技", "农业", "医药", "消费", "新能源", "金融", "军工",
+                         "汽车", "化工", "有色", "机械", "半导体"]
+
+
+# ---------------- 低值复苏：基础工具 ----------------
+def _lv_num(v):
+    try:
+        if v in (None, "-", ""):
+            return None
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _lv_norm_board(name):
+    """去掉板块名的 Ⅱ/Ⅲ 后缀，便于输入"中药"命中"中药Ⅱ" """
+    return re.sub(r"[ⅡⅢ]+$", "", str(name or "").strip()).strip()
+
+
+def _lv_load_json(path, default=None):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def _lv_save_json(path, obj):
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=1)
+    except Exception:
+        pass
+
+
+def _lv_today():
+    return datetime.date.today().strftime("%Y-%m-%d")
+
+
+def _lv_em_get(path, params, timeout=LOWVAL_TIMEOUT):
+    """东财请求：轮换镜像节点并记住可用节点；全部失败抛异常"""
+    hosts = ([_LV_HOST_OK["host"]] if _LV_HOST_OK["host"] else []) + \
+            [h for h in LOWVAL_HOSTS if h != _LV_HOST_OK["host"]]
+    last_err = None
+    for host in hosts:
+        for _ in range(2):
+            try:
+                r = requests.get(f"https://{host}{path}", params=params,
+                                 headers=LOWVAL_HEADERS, timeout=timeout)
+                data = r.json()
+                if data:
+                    _LV_HOST_OK["host"] = host
+                    return data
+            except Exception as e:
+                last_err = e
+            time.sleep(0.3)
+    raise RuntimeError(f"东财接口不可用: {last_err}")
+
+
+def _lv_clist(fs, pages=1, fields=LOWVAL_FIELDS, fid="f6"):
+    """拉取东财榜单（板块成分股 / 全市场截面），按 fid 降序取前 pages 页"""
+    rows = []
+    for pn in range(1, max(1, int(pages)) + 1):
+        data = _lv_em_get("/api/qt/clist/get", {
+            "pn": pn, "pz": 100, "po": 1, "np": 1, "fltt": 2, "invt": 2,
+            "fid": fid, "fs": fs, "fields": fields,
+        })
+        diff = ((data or {}).get("data") or {}).get("diff") or []
+        if not diff:
+            break
+        rows.extend(diff)
+        if len(diff) < 100:
+            break
+        time.sleep(0.15)
+    return rows
+
+
+def lowval_load_board_map(force=False):
+    """东财行业板块表 {板块名: BK代码}，缓存若干天；失败返回上次缓存"""
+    cached = _lv_load_json(LOWVAL_BOARD_MAP_FILE) or {}
+    fetched = cached.get("fetched_at") or ""
+    if not force and cached.get("boards") and fetched:
+        try:
+            age = (datetime.date.today() -
+                   datetime.datetime.strptime(fetched, "%Y-%m-%d").date()).days
+            if age <= LOWVAL_BOARD_CACHE_DAYS:
+                return cached["boards"]
+        except Exception:
+            pass
+    boards = {}
+    try:
+        for pn in range(1, 7):
+            data = _lv_em_get("/api/qt/clist/get", {
+                "pn": pn, "pz": 100, "po": 1, "np": 1, "fltt": 2, "invt": 2,
+                "fid": "f3", "fs": "m:90+t:2", "fields": "f12,f14",
+            })
+            d = (data or {}).get("data") or {}
+            diff = d.get("diff") or []
+            if not diff:
+                break
+            for r in diff:
+                if r.get("f14") and r.get("f12"):
+                    boards[str(r["f14"]).strip()] = str(r["f12"]).strip()
+            if len(boards) >= (d.get("total") or 0):
+                break
+            time.sleep(0.2)
+    except Exception:
+        return cached.get("boards") or {}
+    if boards:
+        _lv_save_json(LOWVAL_BOARD_MAP_FILE, {"fetched_at": _lv_today(),
+                                              "boards": boards})
+    return boards
+
+
+def lowval_available_sectors():
+    """网页上可展示的板块关键词"""
+    return list(LOWVAL_SECTOR_ALIAS.keys())
+
+
+def lowval_resolve_sectors(text):
+    """解析输入 → {"boards":[(板块名,代码)], "unknown":[词], "kws":[...]}"""
+    kws = [k.strip() for k in re.split(r"[,，、;；\s/|]+", text or "") if k.strip()]
+    boards, seen, unknown = [], set(), []
+    board_map = None
+    for kw in kws:
+        if kw in LOWVAL_SECTOR_ALIAS:
+            hit_names = list(LOWVAL_SECTOR_ALIAS[kw])
+        elif kw in LOWVAL_BOARD_CODES:
+            hit_names = [kw]
+        else:
+            if board_map is None:
+                board_map = lowval_load_board_map()
+            pool = dict(LOWVAL_BOARD_CODES)
+            pool.update(board_map)
+            norm_kw = _lv_norm_board(kw)
+            exact = [n for n in pool if _lv_norm_board(n) == norm_kw]
+            fuzzy = [n for n in pool if norm_kw and norm_kw in _lv_norm_board(n)]
+            hit_names = exact or fuzzy[:6]
+        if not hit_names:
+            unknown.append(kw)
+            continue
+        if board_map is None:
+            board_map = {}
+        for name in hit_names:
+            code = LOWVAL_BOARD_CODES.get(name) or board_map.get(name)
+            if not code or code in seen:
+                continue
+            seen.add(code)
+            boards.append((name, code))
+    return {"boards": boards, "unknown": unknown, "kws": kws}
+
+
+# ---------------- 低值复苏：股票池 ----------------
+def _lv_parse_em_rows(raw, source="东财板块"):
+    """东财榜单行 → 统一结构（含所属行业 f100）"""
+    out = []
+    for r in raw:
+        code = str(r.get("f12") or "").strip()
+        price = _lv_num(r.get("f2"))
+        if not code or not price or price <= 0:
+            continue
+        out.append({
+            "code": code,
+            "name": str(r.get("f14") or "").strip(),
+            "price": price,
+            "change_pct": _lv_num(r.get("f3")) or 0.0,
+            "amount_yi": round((_lv_num(r.get("f6")) or 0.0) / 1e8, 2),
+            "turnover": _lv_num(r.get("f8")),
+            "pe": _lv_num(r.get("f9")),
+            "pb": _lv_num(r.get("f23")),
+            "total_mv": round((_lv_num(r.get("f20")) or 0.0) / 1e8, 2),
+            "industry": str(r.get("f100") or "").strip(),
+            "source": source,
+        })
+    return out
+
+
+def _lv_board_rows(board_code, pages=LOWVAL_BOARD_PAGES, force=False):
+    """板块成分股（含换手/PE/PB/市值），按成交额降序；当日缓存"""
+    cache = _lv_load_json(LOWVAL_POOL_CACHE_FILE) or {}
+    entry = (cache.get("boards") or {}).get(board_code) or {}
+    if not force and entry.get("fetched_at") == _lv_today() and entry.get("rows"):
+        return entry["rows"]
+    try:
+        raw = _lv_clist(f"b:{board_code}", pages=pages)
+    except Exception:
+        return entry.get("rows") or []
+    out = _lv_parse_em_rows(raw, source="东财板块")
+    if out:
+        cache.setdefault("boards", {})[board_code] = {
+            "fetched_at": _lv_today(), "rows": out}
+        _lv_save_json(LOWVAL_POOL_CACHE_FILE, cache)
+    return out
+
+
+def _lv_market_rows(force=False):
+    """全市场活跃截面（成交额 top600）：东财直取（带所属行业），失败退回 market_snapshot"""
+    cache = _lv_load_json(LOWVAL_POOL_CACHE_FILE) or {}
+    entry = cache.get("market") or {}
+    if not force and entry.get("fetched_at") == _lv_today() and entry.get("rows"):
+        return entry["rows"]
+    out = []
+    try:
+        out = _lv_parse_em_rows(_lv_clist(LOWVAL_MARKET_FS, pages=LOWVAL_MARKET_PAGES,
+                                          fid="f6"), source="全市场活跃池")
+    except Exception:
+        out = []
+    if not out:
+        try:
+            import market_snapshot
+            rows = ((market_snapshot.get_snapshot() or {}).get("rows")) or []
+        except Exception:
+            rows = []
+        for r in rows:
+            price = _lv_num(r.get("price"))
+            if not price or price <= 0:
+                continue
+            out.append({
+                "code": r.get("code"),
+                "name": str(r.get("name") or "").strip(),
+                "price": price,
+                "change_pct": _lv_num(r.get("change_pct")) or 0.0,
+                "amount_yi": round((_lv_num(r.get("amount")) or 0.0) / 1e8, 2),
+                "turnover": _lv_num(r.get("turnover")),
+                "pe": _lv_num(r.get("pe")),
+                "pb": _lv_num(r.get("pb")),
+                "total_mv": round((_lv_num(r.get("total_mv")) or 0.0) / 1e8, 2),
+                "industry": "",
+                "source": "全市场活跃池(market_snapshot)",
+            })
+    if out:
+        cache["market"] = {"fetched_at": _lv_today(), "rows": out}
+        _lv_save_json(LOWVAL_POOL_CACHE_FILE, cache)
+    return out
+
+
+def _lv_keyword_rows(keywords, rows):
+    """板块名未命中时的关键词兜底：先匹配东财所属行业，再查新浪行业映射"""
+    if not keywords:
+        return []
+    out = [dict(r) for r in rows
+           if r.get("industry") and any(kw in r["industry"] for kw in keywords)]
+    if out:
+        return out
+    try:
+        ind_map = fetch_industry_map() or {}
+    except Exception:
+        return []
+    by_code = {r["code"]: r for r in rows}
+    for code, industry in ind_map.items():
+        if industry and any(kw in industry for kw in keywords) and code in by_code:
+            row = dict(by_code[code])
+            row["industry"] = row.get("industry") or industry
+            out.append(row)
+    return out
+
+
+def lowval_build_pool(sectors_text, meta, force=False):
+    """候选池：东财板块成分股 / 关键词兜底 / 全市场活跃池"""
+    resolved = lowval_resolve_sectors(sectors_text)
+    meta["sectors_input"] = resolved["kws"]
+    meta["boards"] = [{"name": n, "code": c} for n, c in resolved["boards"]]
+    meta["unknown_sectors"] = resolved["unknown"]
+    pool, sector_of = [], {}
+
+    for name, code in resolved["boards"]:
+        rows = _lv_board_rows(code, force=force)
+        if not rows:
+            meta["warnings"].append(f"板块「{name}」成分股获取失败，已跳过")
+            continue
+        for r in rows:
+            sector_of.setdefault(r["code"], name)
+        pool.extend(rows)
+        time.sleep(0.2)
+
+    if not pool:
+        market_rows = _lv_market_rows(force)
+        if sectors_text.strip():
+            kws = resolved["unknown"] or resolved["kws"]
+            fallback = _lv_keyword_rows(kws, market_rows)
+            meta["degraded"] = True
+            if fallback:
+                pool = fallback
+                meta["warnings"].append("东财板块未命中，已改用所属行业关键词匹配（降级）")
+                meta["unknown_sectors"] = []
+            else:
+                pool = market_rows
+                meta["warnings"].append(
+                    f"板块「{'、'.join(kws)}」未命中，结果来自全市场活跃池（非该板块）")
+        else:
+            pool = market_rows
+            meta["notes"].append("未输入板块，使用全市场活跃池（成交额 top600）")
+    elif resolved["unknown"]:
+        meta["warnings"].append("未识别板块：" + "、".join(resolved["unknown"]) + "（已忽略）")
+
+    if not sector_of:
+        for r in pool:
+            sector_of[r["code"]] = r.get("industry") or "未分类"
+
+    uniq, seen = [], set()
+    for r in sorted(pool, key=lambda x: -(x.get("amount_yi") or 0)):
+        if r["code"] in seen:
+            continue
+        seen.add(r["code"])
+        uniq.append(r)
+    meta["pool_size"] = len(uniq)
+    return uniq, sector_of
+
+
+def lowval_coarse_filter(rows, tmin, tmax):
+    """硬门槛：换手区间 / PE>0 / 价格下限 / 剔 ST 退市 次新"""
+    out = []
+    for r in rows:
+        name = r.get("name") or ""
+        if not r.get("code") or not name:
+            continue
+        if name.startswith(("N", "C", "ST", "退", "S")) or "ST" in name:
+            continue
+        price = r.get("price") or 0
+        if price < PRICE_FLOOR:
+            continue
+        pe = r.get("pe")
+        if pe is None or pe <= 0:
+            continue
+        t = r.get("turnover")
+        if t is None or t < tmin or t > tmax:
+            continue
+        if (r.get("amount_yi") or 0) <= 0:
+            continue
+        out.append(r)
+    return out
+
+
+def lowval_interleave_by_sector(rows, sector_of):
+    """各板块轮流取候选（组内仍按成交额降序），避免结果被单一细分行业占满"""
+    groups = {}
+    for r in rows:
+        groups.setdefault(sector_of.get(r["code"], "未分类"), []).append(r)
+    if len(groups) <= 1:
+        return list(rows)
+    out, i = [], 0
+    while True:
+        added = False
+        for g in groups.values():
+            if i < len(g):
+                out.append(g[i])
+                added = True
+        if not added:
+            break
+        i += 1
+    return out
+
+
+# ---------------- 低值复苏：财务与复苏判定 ----------------
+def lowval_fetch_quarterly(code, force=False):
+    """东财 F10 主要财务指标（季报/半年报/年报，最新在前），当日缓存"""
+    cache = _lv_load_json(LOWVAL_FIN_CACHE_FILE) or {}
+    hit = cache.get(code) or {}
+    if not force and hit.get("fetched_at") == _lv_today() and hit.get("rows"):
+        return hit["rows"]
+    market = "SH" if code.startswith(("6", "9", "5")) else (
+        "BJ" if code.startswith(("4", "8")) else "SZ")
+    params = {
+        "type": "RPT_F10_FINANCE_MAINFINADATA", "sty": "ALL",
+        "filter": f'(SECUCODE="{code}.{market}")',
+        "p": "1", "ps": "8", "sr": "-1", "st": "REPORT_DATE",
+        "source": "HSF10", "client": "PC",
+    }
+    rows = []
+    try:
+        r = requests.get("https://datacenter.eastmoney.com/securities/api/data/get",
+                         params=params, headers=LOWVAL_HEADERS, timeout=LOWVAL_TIMEOUT)
+        raw = (r.json().get("result") or {}).get("data") or []
+        for x in raw:
+            rows.append({
+                "report_date": (x.get("REPORT_DATE") or "")[:10],
+                "report_name": x.get("REPORT_DATE_NAME") or "",
+                "rev_growth": _lv_num(x.get("TOTALOPERATEREVETZ")),
+                "profit_growth": _lv_num(x.get("PARENTNETPROFITTZ")),
+                "roe": _lv_num(x.get("ROEJQ")),
+                "gross_margin": _lv_num(x.get("XSMLL")),
+                "net_margin": _lv_num(x.get("XSJLL")),
+                "debt_ratio": _lv_num(x.get("ZCFZL")),
+            })
+    except Exception:
+        rows = []
+    if rows:
+        cache[code] = {"fetched_at": _lv_today(), "rows": rows}
+        _lv_save_json(LOWVAL_FIN_CACHE_FILE, cache)
+        return rows
+    return hit.get("rows") or []          # 接口失败时退回旧缓存
+
+
+def lowval_recovery_assess(fins, strict=True):
+    """业绩复苏判定。
+    strict：最新报告期 营收同比>0 且 净利同比>0，且至少一项优于上一期
+    放宽：任一同比>0 且至少一项优于上一期
+    """
+    if not fins:
+        return {"ok": False, "note": "财务数据不足（接口无数据）",
+                "rev_growth": None, "profit_growth": None, "improved": None}
+    latest = fins[0]
+    prev = fins[1] if len(fins) > 1 else None
+    rev, npf = latest.get("rev_growth"), latest.get("profit_growth")
+    if rev is None or npf is None:
+        return {"ok": False, "note": "财务数据不足（同比缺失）",
+                "rev_growth": rev, "profit_growth": npf, "improved": None}
+    improved = None
+    if prev and prev.get("rev_growth") is not None and prev.get("profit_growth") is not None:
+        improved = bool(rev > prev["rev_growth"] or npf > prev["profit_growth"])
+    if strict:
+        ok = rev > 0 and npf > 0 and (improved is not False)
+        cond = "营收同比>0 且 净利同比>0"
+    else:
+        ok = (rev > 0 or npf > 0) and (improved is not False)
+        cond = "营收或净利任一同比>0"
+    note = f"{latest['report_name']}：营收同比{rev:+.1f}%、净利同比{npf:+.1f}%"
+    if ok:
+        note += "，同比增幅继续改善" if improved else "（上期数据缺失，未做改善校验）"
+    else:
+        note += f"，未满足{cond}"
+        if improved is False:
+            note += "（且同比增幅未改善）"
+    return {"ok": bool(ok), "note": note, "rev_growth": rev, "profit_growth": npf,
+            "improved": improved, "report_name": latest.get("report_name"),
+            "roe": latest.get("roe")}
+
+
+# ---------------- 低值复苏：热度剔除与打分 ----------------
+def _lv_limit_pct(code):
+    """涨停幅度阈值：创业板/科创板 20%，北交所 30%，其余 10%"""
+    if code.startswith(("300", "301", "688", "689")):
+        return 0.195
+    if code.startswith(("4", "8")):
+        return 0.29
+    return 0.095
+
+
+def lowval_heat_check(codes):
+    """5 日暴涨或近 3 日连续涨停的剔除；返回 (剔除集合, K线缓存)
+    K线源连续失败时提前放弃，避免一只一个重试把整页拖慢（结果里会标注未剔除）。"""
+    rows_map, excluded, miss = {}, set(), 0
+    for c in codes:
+        try:
+            rows = Q.fetch_kline(c, datalen=90)
+        except Exception:
+            miss += 1
+            if miss >= 3 and not rows_map:
+                break
+            continue
+        miss = 0
+        if len(rows) < 6:
+            continue
+        rows_map[c] = rows
+        closes = [r["close"] for r in rows]
+        prev5 = closes[-6]
+        ret5 = closes[-1] / prev5 - 1 if prev5 else 0.0
+        thr = _lv_limit_pct(c)
+        cnt = 0
+        for i in range(max(1, len(rows) - 3), len(rows)):
+            prev = rows[i - 1]["close"]
+            if prev and (rows[i]["close"] / prev - 1) >= thr:
+                cnt += 1
+        if ret5 > LOWVAL_HEAT_RET5_CAP or cnt >= LOWVAL_HEAT_LIMIT_DAYS:
+            excluded.add(c)
+    if len(rows_map) >= 10:
+        try:
+            excluded |= heat_exclude(list(rows_map), rows_map)
+        except Exception:
+            pass
+    return excluded, rows_map
+
+
+def _lv_trend_note(rows):
+    """60 日涨幅与均线状态（仅展示，不做门槛）"""
+    if not rows or len(rows) < 61:
+        return None
+    closes = [r["close"] for r in rows]
+    ma20 = Q.sma(closes, 20)[-1]
+    ma60 = Q.sma(closes, 60)[-1]
+    last = closes[-1]
+    return {
+        "ret60": round((last / closes[-61] - 1) * 100, 2) if closes[-61] else None,
+        "above_ma20": None if ma20 is None else bool(last > ma20),
+        "ma20_above_ma60": None if (ma20 is None or ma60 is None) else bool(ma20 > ma60),
+    }
+
+
+def _lv_clip01(x):
+    return max(0.0, min(1.0, x))
+
+
+def lowval_score(assess, pe, pe_median, turnover, tmin, tmax):
+    """0~100 分：复苏强度 45% + 估值便宜度 35% + 换手适中度 20%"""
+    rev = assess.get("rev_growth") or 0.0
+    npf = assess.get("profit_growth") or 0.0
+    imp = assess.get("improved")
+    rec = (0.45 * _lv_clip01(rev / 30.0) + 0.35 * _lv_clip01(npf / 40.0)
+           + 0.20 * (1.0 if imp else 0.5 if imp is None else 0.0))
+    value = _lv_clip01((1 - (pe / pe_median)) / 0.5) if pe_median else 0.5
+    mid, span = (tmin + tmax) / 2.0, max((tmax - tmin) / 2.0, 0.1)
+    turn = _lv_clip01(1 - abs((turnover if turnover is not None else mid) - mid) / span)
+    total = (LOWVAL_W_RECOVERY * rec + LOWVAL_W_VALUE * value
+             + LOWVAL_W_TURNOVER * turn) * 100
+    return round(total, 1), {"recovery": round(rec * 100, 1),
+                             "value": round(value * 100, 1),
+                             "turnover": round(turn * 100, 1)}
+
+
+def _lv_pe_median(rows, fallback_rows):
+    """板块内 PE 中位数（取整个板块样本，剔除 ST/次新/低价）；样本不足用全市场兜底"""
+    def _ok(r):
+        name = r.get("name") or ""
+        if name.startswith(("N", "C", "ST", "退")) or "ST" in name:
+            return False
+        if (r.get("price") or 0) < PRICE_FLOOR:
+            return False
+        return bool(r.get("pe") and r["pe"] > 0)
+
+    pes = [r["pe"] for r in rows if _ok(r)]
+    if len(pes) >= LOWVAL_PE_MIN_SAMPLE:
+        return statistics.median(pes), "所属板块内中位数"
+    all_pe = [r["pe"] for r in fallback_rows if _ok(r)]
+    if all_pe:
+        return statistics.median(all_pe), "全市场中位数（板块样本不足）"
+    return None, "无参考样本"
+
+
+# ---------------- 低值复苏：主入口 ----------------
+def lowval_fallback_pack(pick, force=False):
+    """行情源（腾讯）不可用时的降级数据包：
+    现价/PE/PB 取自东财板块接口已抓到的字段，财务取东财 F10，52 周取东财 push2。
+    结构与 research_data 的数据包一致，可直接喂给速评与四大师评分。"""
+    code = pick["code"]
+    fins = lowval_fetch_quarterly(code, force=force)
+    high52 = low52 = None
+    try:
+        import research_data
+        high52, low52 = research_data.fetch_52w(code)
+    except Exception:
+        pass
+    return {
+        "code": code, "name": pick.get("name") or code,
+        "price": pick.get("price"), "change_pct": pick.get("change_pct"),
+        "pe": pick.get("pe"), "pb": pick.get("pb"),
+        "market_cap_yi": pick.get("total_mv"), "float_cap_yi": None,
+        "amount_yi": pick.get("amount"), "turnover_rate": pick.get("turnover"),
+        "high_52w": high52, "low_52w": low52,
+        "financials": fins, "report_date": _lv_today(), "from_cache": False,
+        "notes": ["行情源(腾讯)不可用：现价/PE/PB 取自东财板块行情，"
+                  "财务取自东财 F10（降级生成）"],
+    }
+
+
+def lowval_fundamental(picks, force=False):
+    """对入选股票生成「基本面速评（自动初筛）」与「四大师财务代理初筛」HTML 片段。
+    复用 research_data 的年报财务快照与 master_score 的规则化评分；
+    两块共用同一份数据包，每只 3 个请求（当日快照自动缓存，二次运行很快）；
+    行情源不可用时自动降级为纯东财数据，不会整块空白。"""
+    out = {"quick_html": "", "master_html": "", "failed": [], "degraded": []}
+    if not picks:
+        return out
+    try:
+        import research_data
+    except Exception:
+        return out
+    import concurrent.futures as _cf
+
+    def _pack(p):
+        """先取标准数据包（腾讯行情+东财）；行情源不可用则退回纯东财降级包"""
+        try:
+            pack = research_data.get_pack(p["code"], force=force)
+            if pack:
+                return pack, "ok"
+        except Exception:
+            pass
+        try:
+            return lowval_fallback_pack(p, force=force), "degraded"
+        except Exception:
+            return None, "failed"
+
+    packs = [None] * len(picks)
+
+    def _collect(results):
+        for i, (pack, tag) in enumerate(results):
+            packs[i] = pack
+            if tag == "degraded":
+                out["degraded"].append(picks[i]["code"])
+            elif tag == "failed":
+                out["failed"].append(picks[i]["code"])
+
+    workers = max(1, min(4, len(picks)))
+    try:                       # 逐只取数彼此独立，并行做，避免一只超时拖慢全部
+        with _cf.ThreadPoolExecutor(max_workers=workers) as ex:
+            _collect(list(ex.map(_pack, picks)))
+    except Exception:
+        _collect([_pack(p) for p in picks])
+    try:
+        out["quick_html"] = research_data.build_quick_review_html(packs)
+    except Exception:
+        pass
+    try:
+        import master_score
+        out["master_html"] = master_score.build_master_review_html(packs)
+    except Exception:
+        pass
+    return out
+
+
+def pick_lowval(sectors=None, limit=LOWVAL_LIMIT, tmin=LOWVAL_TURNOVER_MIN,
+                tmax=LOWVAL_TURNOVER_MAX, relax=True, force=False,
+                with_fundamental=True):
+    """低值复苏选股（网页 /lowval 专用），返回 {"picks": [...], "meta": {...}}
+
+    picks 字段：code/name/sector/price/change_pct/turnover/pe/pb/total_mv/amount/
+                score/score_parts/rev_growth/profit_growth/roe/report_name/
+                recovery_note/relax_level/trend
+    fundamental 字段：{"quick_html","master_html","failed"}（基本面速评 + 四大师初筛）
+    """
+    meta = {"warnings": [], "notes": [], "sectors_input": [], "boards": [],
+            "unknown_sectors": [], "relax_level": 0, "relax_notes": [],
+            "market_ok": None, "degraded": False,
+            "fetched_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "turnover_range": [tmin, tmax]}
+    try:
+        db.init_db()
+    except Exception:
+        pass
+
+    pool, sector_of = lowval_build_pool(sectors or "", meta, force=force)
+    if not pool:
+        meta["warnings"].append("候选池为空：板块接口与全市场截面均不可用")
+        return {"picks": [], "meta": meta}
+
+    fallback_rows = _lv_market_rows(force) or pool
+    stages = [(tmin, tmax, True, 0, None)]
+    if relax:
+        stages.append((LOWVAL_TURNOVER_RELAX[0], LOWVAL_TURNOVER_RELAX[1], True, 1,
+                       "换手区间放宽至 %.0f%%~%.0f%%" % LOWVAL_TURNOVER_RELAX))
+        stages.append((LOWVAL_TURNOVER_RELAX[0], LOWVAL_TURNOVER_RELAX[1], False, 2,
+                       "复苏口径放宽为『营收或净利任一同比>0 且较上期改善』"))
+
+    used, verified, kline_map = set(), {}, {}
+    picks = []
+    for (lo, hi, strict, lvl, relax_note) in stages:
+        cands = lowval_coarse_filter(pool, lo, hi)
+        meta["relax_level"] = lvl
+        if lvl:
+            meta["notes"].append(f"分级放宽（第{lvl}级）：{relax_note}")
+            meta["relax_notes"].append(relax_note)
+            meta["turnover_range"] = [lo, hi]
+        pe_median, pe_scope = _lv_pe_median(pool, fallback_rows)
+        meta["pe_median"] = round(pe_median, 2) if pe_median else None
+        meta["pe_median_scope"] = pe_scope
+        if not pe_median:
+            meta["warnings"].append("PE 中位数样本不足，估值门槛本次未生效")
+        cap = LOWVAL_SHORTLIST_SIZE if lvl == 0 else LOWVAL_SHORTLIST_MAX
+        ordered = lowval_interleave_by_sector(cands, sector_of)
+        if pe_median:
+            shortlist = [r for r in ordered if r.get("pe") and r["pe"] < pe_median][:cap]
+        else:
+            shortlist = ordered[:cap]
+        meta["shortlist_size"] = len(shortlist)
+        if not shortlist:
+            continue
+
+        for r in shortlist:
+            if r["code"] in used:
+                continue
+            used.add(r["code"])
+            rows = lowval_fetch_quarterly(r["code"], force=force)
+            verified[r["code"]] = {
+                "row": r, "sector": sector_of.get(r["code"], "未分类"),
+                "assess": lowval_recovery_assess(rows, strict=strict),
+            }
+            time.sleep(0.12)
+        short_codes = {r["code"] for r in shortlist}
+        ok_codes = [c for c, v in verified.items()
+                    if v["assess"]["ok"] and c in short_codes]
+        if len(ok_codes) < limit and lvl < stages[-1][3]:
+            continue                      # 进入下一级放宽
+        if len(ok_codes) < limit:
+            meta["warnings"].append(
+                f"放宽后仍只有 {len(ok_codes)} 只达标（目标 {limit} 只），如实输出")
+        excluded, kline_map = lowval_heat_check(ok_codes)
+        if ok_codes and not kline_map:
+            meta["notes"].append("K线源暂不可用，本次未做热度剔除"
+                                 "（5日暴涨/连续涨停未过滤，结果仅供参考）")
+        if excluded:
+            names = [verified[c]["row"]["name"] for c in excluded if c in verified]
+            meta["notes"].append("热度剔除（5日暴涨或连续涨停）：" + "、".join(names))
+        scored = []
+        for c in ok_codes:
+            if c in excluded:
+                continue
+            v = verified[c]
+            sc, parts = lowval_score(v["assess"], v["row"]["pe"], pe_median,
+                                     v["row"]["turnover"], lo, hi)
+            scored.append((sc, parts, c))
+        scored.sort(key=lambda x: -x[0])
+        picks = []
+        for sc, parts, c in scored[:limit]:
+            v, r = verified[c], verified[c]["row"]
+            picks.append({
+                "code": c, "name": r["name"], "sector": v["sector"],
+                "price": r["price"], "change_pct": r["change_pct"],
+                "turnover": r["turnover"], "pe": r["pe"], "pb": r["pb"],
+                "total_mv": r["total_mv"], "amount": r["amount_yi"],
+                "score": sc, "score_parts": parts,
+                "rev_growth": v["assess"].get("rev_growth"),
+                "profit_growth": v["assess"].get("profit_growth"),
+                "roe": v["assess"].get("roe"),
+                "report_name": v["assess"].get("report_name"),
+                "recovery_note": v["assess"]["note"],
+                "relax_level": lvl, "trend": _lv_trend_note(kline_map.get(c)),
+                "source": r.get("source", ""),
+            })
+        if len(picks) >= limit or lvl >= stages[-1][3]:
+            break
+        picks = []
+
+    try:
+        reg_ok, reg_note = _market_regime()
+        meta["market_ok"] = reg_ok
+        meta["market_note"] = reg_note
+    except Exception as e:
+        meta["market_note"] = f"大盘环境判定失败（{e}）"
+
+    meta["checked"] = len(verified)
+    meta["generated_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    result = {"picks": picks, "meta": meta}
+    if with_fundamental and picks:
+        try:
+            result["fundamental"] = lowval_fundamental(picks, force=force)
+            failed = result["fundamental"].get("failed") or []
+            if failed:
+                meta["notes"].append("基本面数据获取失败：" + "、".join(failed)
+                                     + "（该股在速评表中已跳过）")
+            degraded = result["fundamental"].get("degraded") or []
+            if degraded:
+                meta["notes"].append("行情源(腾讯)不可用，以下股票的基本面速评已降级为"
+                                     "纯东财数据（现价/PE/PB 取东财板块行情）："
+                                     + "、".join(degraded))
+        except Exception as e:
+            meta["warnings"].append(f"基本面速评生成失败：{e}")
+    return result
 
 
 if __name__ == "__main__":

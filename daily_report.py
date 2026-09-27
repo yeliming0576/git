@@ -180,6 +180,128 @@ def _logic_compare_html(picks, slide_of=None):
   <div class="sub">链接说明：量化页=本报告该股技术分析页；紫苏叶/看板页=紫苏叶看板对应标的一页纸（需网页模式，地址栏自动定位）。</div>"""
 
 
+_LV_TAB_JS = """
+// ===== 低值复苏股页签：数据由网页服务实时生成 =====
+const SLIDE_OF = __SLIDE_OF__;
+const LV_PRESETS = __PRESETS__;
+function lvEsc(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/[&<>"]/g, function (c) {
+      return ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[c];
+    });
+}
+function lvPct(v) {
+  if (v === null || v === undefined) return '—';
+  return (v > 0 ? '+' : '') + Number(v).toFixed(2) + '%';
+}
+function lvQuantLink(code) {
+  if (Object.prototype.hasOwnProperty.call(SLIDE_OF, code)) {
+    return '<a href="#" onclick="go(' + SLIDE_OF[code] + ');return false;">量化页</a>';
+  }
+  return '<a href="/quant?code=' + encodeURIComponent(code)
+    + '" target="_blank" title="新窗口生成该股量化分析页">量化页 ↗</a>';
+}
+function lvRender(res) {
+  const meta = (res && res.meta) || {}, picks = (res && res.picks) || [];
+  const box = document.getElementById('lvResult');
+  if (!box) return;
+  let h = '';
+  if (meta.market_ok === false) {
+    h += '<div style="background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:10px;'
+      + 'padding:10px 14px;margin:10px 0;font-size:13px;"><b>大盘环境偏弱</b>：'
+      + lvEsc(meta.market_note) + '；本页仍输出候选，但建议降低仓位、分批建仓。</div>';
+  } else if (meta.market_ok === true) {
+    h += '<div style="background:#f0fdf4;border:1px solid #bbf7d0;color:#15803d;border-radius:10px;'
+      + 'padding:8px 14px;margin:10px 0;font-size:13px;">大盘环境正常：' + lvEsc(meta.market_note) + '</div>';
+  }
+  h += '<div class="sub" style="margin-top:8px;">结果 ' + picks.length + ' 只｜输入：'
+    + (meta.sectors_input && meta.sectors_input.length
+        ? lvEsc(meta.sectors_input.join('、')) : '全市场活跃池')
+    + '｜候选池 ' + (meta.pool_size || 0) + ' 只 → 核验 ' + (meta.checked || 0) + ' 只｜PE 基准 '
+    + lvEsc(meta.pe_median_scope || '—') + ' ' + (meta.pe_median || '—')
+    + '｜放宽级别 ' + (meta.relax_level || 0)
+    + (meta.generated_at ? '｜生成 ' + lvEsc(meta.generated_at) : '') + '</div>';
+  h += '<table><tr><th>#</th><th>股票</th><th>板块</th><th>现价</th><th>换手</th><th>PE</th>'
+    + '<th>市值</th><th>营收同比</th><th>净利同比</th><th>报告期</th><th>评分</th><th>量化页</th></tr>';
+  picks.forEach(function (p, i) {
+    h += '<tr><td>' + (i + 1) + '</td><td><b>' + lvEsc(p.name) + '</b><br><span class="sub">'
+      + lvEsc(p.code) + '</span></td><td>' + lvEsc(p.sector) + '</td><td>' + Number(p.price).toFixed(2)
+      + '<br><span class="sub">' + (p.change_pct > 0 ? '+' : '')
+      + Number(p.change_pct).toFixed(2) + '%</span></td><td>' + Number(p.turnover).toFixed(2)
+      + '%</td><td>' + Number(p.pe).toFixed(1) + '</td><td>' + Math.round(p.total_mv)
+      + '亿</td><td>' + lvPct(p.rev_growth) + '</td><td>' + lvPct(p.profit_growth)
+      + '</td><td>' + lvEsc(p.report_name) + '</td><td><b>' + Number(p.score).toFixed(1)
+      + '</b></td><td>' + lvQuantLink(p.code) + '</td></tr>';
+  });
+  if (!picks.length) h += "<tr><td colspan='12'>本次无符合条件的股票</td></tr>";
+  h += '</table>';
+  const notes = (meta.notes || []).concat(meta.warnings || []);
+  if (notes.length) {
+    h += '<ul style="margin:10px 0 0 18px;font-size:12px;color:#6b7280;">'
+      + notes.map(function (n) { return '<li>' + lvEsc(n) + '</li>'; }).join('') + '</ul>';
+  }
+  const fund = res.fundamental || {};
+  if (fund.quick_html || fund.master_html) {
+    h += '<div style="margin-top:16px;">' + (fund.quick_html || '')
+      + (fund.master_html || '') + '</div>';
+  }
+  box.innerHTML = h;
+}
+async function lvRun() {
+  const secEl = document.getElementById('lvSectors');
+  const msg = document.getElementById('lvMsg');
+  const btn = document.getElementById('lvRun');
+  const box = document.getElementById('lvResult');
+  const minEl = document.getElementById('lvMin'), maxEl = document.getElementById('lvMax');
+  if (!btn || !box) return;
+  const sec = secEl ? secEl.value.trim() : '';
+  const tmin = (minEl && minEl.value) || '3';
+  const tmax = (maxEl && maxEl.value) || '8';
+  btn.disabled = true; btn.textContent = '选股中…';
+  if (msg) msg.textContent = '正在取板块成分股、逐只核验财务并生成基本面速评，约 30 秒~1 分钟，请稍候…';
+  box.innerHTML = '';
+  try {
+    const url = '/lowval?format=json&sectors=' + encodeURIComponent(sec)
+      + '&tmin=' + encodeURIComponent(tmin) + '&tmax=' + encodeURIComponent(tmax);
+    const r = await fetch(url);
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.msg || '选股失败');
+    lvRender(d.result);
+    if (msg) msg.textContent = '';
+  } catch (e) {
+    if (msg) msg.innerHTML = '生成失败：' + lvEsc(e.message)
+      + '。请确认已通过「启动报告服务」打开本报告后重试。';
+  } finally {
+    btn.disabled = false; btn.textContent = '开始选股';
+  }
+}
+(function initLowValTab() {
+  const pbox = document.getElementById('lvPresets');
+  if (pbox) {
+    pbox.innerHTML = '快捷板块：' + LV_PRESETS.map(function (s) {
+      return '<a href="#" class="lvpre" data-s="' + lvEsc(s)
+        + '" style="display:inline-block;background:#eef4ff;border:1px solid #d3e0ff;'
+        + 'border-radius:999px;padding:3px 10px;margin:0 6px 6px 0;text-decoration:none;'
+        + 'font-size:12px;">' + lvEsc(s) + '</a>';
+    }).join('');
+    pbox.addEventListener('click', function (e) {
+      const a = e.target.closest('.lvpre');
+      if (!a) return;
+      e.preventDefault();
+      if (document.getElementById('lvSectors')) {
+        document.getElementById('lvSectors').value = a.dataset.s;
+      }
+      lvRun();
+    });
+  }
+  const btn = document.getElementById('lvRun');
+  if (btn) btn.addEventListener('click', lvRun);
+  const inp = document.getElementById('lvSectors');
+  if (inp) inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') lvRun(); });
+})();
+"""
+
+
 def build_report_html(analyses, title, note, gen_time, watch_codes=None, tracking=None,
                       quick_html="", master_html="", thesis_html="", bottleneck_html="",
                       compare_html=""):
@@ -290,10 +412,33 @@ def build_report_html(analyses, title, note, gen_time, watch_codes=None, trackin
         tag = (f"<span class='tag' style='background:#244;color:#7fd'>{label}</span>" if label else "")
         pages.append(Q.lite_section_html(a, idx, len(charts), tag=tag, a2=a2))
         charts.append(Q.full_chart_json(a))
+
+    # 低值复苏股页签：导航排在"总览"右侧；内容由网页服务实时生成（/lowval?format=json）
+    lv_idx = 2 + len(analyses)
+    slide_of_json = json.dumps(
+        {code: 2 + i for i, (code, _l, _a, _a2) in enumerate(analyses)}, ensure_ascii=False)
+    presets_json = json.dumps(selection.LOWVAL_PRESET_SECTORS, ensure_ascii=False)
+    tabs.insert(1, f'<button class="navbtn" data-slide="slide{lv_idx}">低值复苏股</button>')
+    pages.append(f"""<div class="slide manage" id="slide{lv_idx}">
+  <h2>低值复苏股</h2>
+  <div class="sub">输入板块（科技 / 农业 / 医药…，多个用逗号分隔），选出 5 只「换手 3~8% + PE 低于所属板块中位数 + 最新报告期营收与净利同比双正且较上期改善」的股票；结果下方自动附<b>基本面速评（自动初筛）</b>与<b>四大师财务代理初筛</b>。每行右侧「量化页」可进入该股分析页（已在报告里的直接跳转，其余新窗口生成）。</div>
+  <div class="panel">
+    <div class="addrow">
+      <input id="lvSectors" class="stock-input" placeholder="科技、农业、医药、半导体…（留空 = 全市场活跃池）">
+      <button id="lvRun" class="btn-add">开始选股</button>
+      <span class="sub" style="white-space:nowrap;">换手
+        <input id="lvMin" value="3" style="width:46px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:8px;">~
+        <input id="lvMax" value="8" style="width:46px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:8px;">%</span>
+    </div>
+    <div class="sub" id="lvPresets" style="margin-top:8px;"></div>
+    <div class="sub" id="lvMsg" style="margin-top:8px;"></div>
+    <div id="lvResult"></div>
+  </div>
+</div>""")
     charts_json = json.dumps(charts, ensure_ascii=False)
     tabs_html = "\n    ".join(tabs)
     pages_html = "\n".join(pages)
-    return f"""<!DOCTYPE html>
+    html_out = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -621,6 +766,12 @@ setInterval(function () {{
 }}, 1000);
 </script>
 </body></html>"""
+    # 低值复苏股页签脚本（单独拼接，避免在 f-string 里转义大量花括号）
+    lv_js = (_LV_TAB_JS.replace("__SLIDE_OF__", slide_of_json)
+             .replace("__PRESETS__", presets_json))
+    if "</body>" in html_out:
+        html_out = html_out.replace("</body>", "<script>" + lv_js + "</script>\n</body>", 1)
+    return html_out
 
 
 def main():
