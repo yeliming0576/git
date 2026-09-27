@@ -1,25 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-统一的项目根目录定位（打包成 EXE 后依然正确）
-================================================
-背景：项目里多个模块都写 `BASE = os.path.dirname(os.path.abspath(__file__))`。
-PyInstaller onefile 模式下 __file__ 指向 %TEMP%\\_MEIxxxxx（随机目录、退出即删），
-数据 / 报告归档 / 自选股.txt 会被写进临时目录，关掉程序就丢。
+统一的项目根目录定位（模块分层 + 打包成 EXE 后依然正确）
+==========================================================
+背景：核心模块都在 stockapp/ 包里，若各自用 dirname(__file__) 当 BASE，
+数据目录会跟着代码跑进 stockapp/；PyInstaller onefile 模式下更糟：
+__file__ 指向 %TEMP%\\_MEIxxxxx（随机目录、退出即删），数据关掉程序就丢。
 
-改用本模块后：
-  - 源码运行：BASE = 本文件所在目录（即项目根目录），行为与之前完全一致
-  - EXE 运行：BASE = EXE 所在目录，数据长在 EXE 旁边，迁移时整个文件夹拷走即可
+本模块统一解析：
+  - 源码运行：BASE = stockapp/ 的上一级 = 项目根目录
+  - EXE 运行：BASE = EXE 所在目录，数据长在 EXE 旁边，整个文件夹拷走即可
 
-用法：把原来的
-      try:
-          from stockapp.app_paths import BASE
-      except ImportError:  # 兼容单独运行本文件的场景
-          BASE = os.path.dirname(os.path.abspath(__file__))
-  换成
-      try:
-          from stockapp.app_paths import BASE
-      except ImportError:
-          BASE = os.path.dirname(os.path.abspath(__file__))
+用法：
+      from stockapp.app_paths import BASE
+      DATA_DIR = os.path.join(BASE, "数据")
 """
 import os
 import sys

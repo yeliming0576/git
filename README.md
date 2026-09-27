@@ -66,6 +66,77 @@
 - **存档**：网页每次生成即存 `报告归档\低值复苏\低值复苏选股_日期.html/.json`，超 30 天自动并入 `报告归档\YYYY-MM.zip`。
 - 参数都在 `selection.py` 的低值复苏段落顶部（`LOWVAL_` 前缀）；数据来自现有免费接口（东财板块成分股 + 东财 F10 财务），当日缓存，二次运行走缓存很快。
 
+## 项目结构（2026-09 重构后）
+
+```
+选股/                    项目根（数据、报告、日志都在这里）
+├─ stockapp/             核心包：数据层 / 选股 / 回测 / 报告 / 服务
+│   ├─ datafeed.py       统一取数（重试/退避/限流 + akshare/efinance 兜底）
+│   ├─ backtest_engine.py 公共回测口径（T+1 开盘 / 双边成本 / 涨跌停不可成交）
+│   ├─ config.py         集中配置默认值（可被 config.json 覆盖）
+│   ├─ log_utils.py      统一日志（日志/运行日志_日期.log，保留 30 天）
+│   └─ selection / quant_engine / v2 / daily_report / report_server / db …
+├─ *.py                  入口薄包装（python xxx.py 与双击 .cmd 用法完全不变）
+├─ 紫苏叶选股/            独立的产业瓶颈选股模块（只读复用 stockapp）
+├─ tests/               离线测试（pytest）
+├─ 数据/ 报告归档/ 日志/   运行期数据（不入版本库）
+└─ config.example.json  复制成 config.json 即可改参数
+```
+
+## 改参数不用改代码（config.json）
+
+复制 `config.example.json` 为 `config.json`，只写要覆盖的键，例如：
+
+```json
+{"PRICE_CAP_FLOOR": 15, "LOWVAL_LIMIT": 8, "PORT": 9000}
+```
+
+优先级：`config.json` > `config.py` 默认值。未知键、类型不符的键会被忽略并写日志；改完需重启程序。
+EXE 用户把 config.json 放在 EXE 同目录即可。
+
+## 数据源与降级顺序
+
+主源不变（东财/新浪/腾讯），失败时按下列顺序自动降级，日志会记录实际来源：
+
+| 数据 | 顺序 |
+|---|---|
+| 行情 quote | 腾讯 → akshare → efinance |
+| K线 kline | 新浪 → akshare → efinance |
+| 财务 financials | 东财 F10 → akshare |
+| 热度榜 rank | 新浪 → 东财 → akshare |
+| 活跃截面 | 东财 → akshare → 新浪成交额榜 |
+
+可选兜底依赖：`python -m pip install -r requirements-extras.txt`（akshare / efinance）。
+未安装时自动跳过，主流程不受影响；两个 PyInstaller spec 已把这两个包排除，
+EXE 版本只用主源，需要兜底请用源码方式运行。
+
+## 测试
+
+```bat
+python -m pip install pytest pygments
+python -m pytest            :: 离线用例，约 3 秒
+python -m pytest -m network :: 需要联网的用例（默认跳过）
+```
+
+CI 配置在 `.github/workflows/ci.yml`，push 后在 GitHub Actions 上跑离线用例。
+
+## 已知风险与边界（本轮刻意未改）
+
+- **报告服务无鉴权（维持现状）**：服务绑定 `0.0.0.0`，局域网内任何人都能查看报告，
+  并可调用 `/save`（覆盖最新报告）、`/refresh`（重新抓数出报告）、`/addstock`、
+  `/removestock`、`/manualbuy`（写模拟盘账本）。建议只在可信办公网使用；
+  如需收紧可加访问令牌或把写操作限制为本机（本轮未做）。
+- 个股回测是单标的、日频、固定分数仓位，未建模冲击成本与融资成本；
+  组合级回测仍在模拟盘框架（`paper_trade.py`）内。
+- 免费接口单源未经双源核验时，报告会明确标注数据来源与局限。
+
+## 许可
+
+本项目采用 MIT License（见 `LICENSE`）。内置的 `tools/financial_rigor.py`、
+`tools/report_audit.py` 来自 [AI Berkshire](https://github.com/mnshu/ai-berkshire)（MIT），
+`echarts.min.js` 来自 Apache ECharts（Apache-2.0）；`cnfinancialscraper/` 为本地第三方技能目录，
+未纳入版本库，缺失时自动降级到内置 `stockapp/eastmoney.py`。
+
 ## 常见问题
 
 - **数据存哪里？** 历史数据保存在 `数据\选股数据.db`（SQLite 单文件数据库）与 `数据\journal.db`（模拟盘账本），排名/热门股缓存也在 `数据\`；数据库不可用时自动回退到 JSON，不影响运行。

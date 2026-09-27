@@ -36,6 +36,8 @@ reports/
 *.pid
 网页服务.pid
 LAN_SHARE.flag
+# 本地配置覆盖（示例见 config.example.json）
+config.json
 
 # ===== 打包与备份产物 =====
 build/
